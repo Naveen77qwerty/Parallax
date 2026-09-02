@@ -86,11 +86,13 @@ class TestIVRank:
 
 class TestIV30HV20Ratio:
     def _geometric_series(self, sigma_annual: float, n: int = 21) -> list[float]:
-        """Build a price series whose realized vol ≈ sigma_annual."""
+        """Build a price series whose realized vol ≈ sigma_annual (alternating steps)."""
         daily = sigma_annual / math.sqrt(252)
         prices = [100.0]
-        for _ in range(n - 1):
-            prices.append(prices[-1] * math.exp(daily))
+        for i in range(n - 1):
+            # Alternate up/down so sample variance is non-zero
+            direction = 1 if i % 2 == 0 else -1
+            prices.append(prices[-1] * math.exp(direction * daily))
         return prices
 
     def test_ratio_above_one_when_iv_rich(self):
@@ -269,8 +271,7 @@ def mock_settings(tmp_path):
         anthropic_api_key="test-key",
         claude_model="claude-opus-4-5",
     )
-    with patch("barbell.screen.universe.get_settings", return_value=settings), \
-         patch("barbell.screen.metrics.get_settings", return_value=settings):
+    with patch("barbell.screen.universe.get_settings", return_value=settings):
         yield settings
 
 

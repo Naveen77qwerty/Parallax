@@ -499,14 +499,15 @@ def _synthetic_close_series(iv30: float, target_hv20: float) -> list[float]:
     """
     Build a 21-price series whose 20-day HV annualises to approximately target_hv20.
 
-    Used only when real bar data is unavailable. The series is a geometric
-    random walk with deterministic steps sized to produce the target HV.
+    Uses alternating up/down steps so sample variance is non-zero and the HV
+    calculation produces a finite, non-zero value.
     """
     daily_sigma = target_hv20 / math.sqrt(252)
     prices = [100.0]
     for i in range(20):
-        # Deterministic "up" steps so the function is reproducible
-        prices.append(prices[-1] * math.exp(daily_sigma))
+        # Alternate up/down so returns have non-zero variance
+        direction = 1 if i % 2 == 0 else -1
+        prices.append(prices[-1] * math.exp(direction * daily_sigma))
     return prices
 
 
