@@ -166,3 +166,123 @@ Either way: `barbell status` and the Streamlit dashboard are the two things to h
 3. **Wed Sep 2:** scale Sleeve A to target size if the pipeline is stable; dashboard; start the demo script/recording plan.
 4. **Thu Sep 3:** unwind Sleeve A per `endgame/schedule.py`'s UNWIND phase, enter Sleeve B convexity late session, finalize write-up draft via `journal/export.py`.
 5. **Fri Sep 4:** monetize Sleeve B into the open, confirm FLAT phase before 10:45 ET, run `journal export`, submit with account ID before 11:00 ET.
+
+## Member 1 handoff
+
+Foundation layer complete. All contracts, settings, broker interfaces, clock functions, append-only journal tables, and verification scripts are tested and ready for Members 2, 3, and 4 to import.
+
+### 1. The Shared Contract Layer (`agent/schemas.py`)
+
+All models inherit from `pydantic.BaseModel`. Import path: `from barbell.agent.schemas import (...)`
+
+```python
+from datetime import date, datetime
+from typing import Any, Literal
+from pydantic import BaseModel, Field
+
+class HeadlineDigest(BaseModel):
+    """Stage 1.5 output (Featherless AI / Qwen model). Informational context only."""
+    symbol: str
+    news_volume: Literal["low", "normal", "elevated"]
+    summary: str = ""       # Empty string is default for neutral / failed; NEVER None
+    model_used: str = ""    # e.g. "Qwen/Qwen2.5-7B-Instruct"
+
+class CatalystVerdict(BaseModel):
+    """Stage 2 output (Claude LLM #1). True = unscheduled binary risk -> veto trade."""
+    symbol: str
+    catalyst_risk: bool
+    reasoning: str
+    sources_considered: list[str] = []
+
+class ProposedLeg(BaseModel):
+    """One leg of an option structure for execution."""
+    symbol: str = ""        # OCC-format string (e.g. 'NVDA260904P00110000'), or empty before resolution
+    expiry: date            # Expiration date of the contract
+    strike: float           # Strike price in USD
+    right: Literal["call", "put"]
+    side: Literal["buy", "sell"]
+    contracts: int          # Positive contract count
+    ratio_qty: int = 1      # Spread leg ratio (1 for standard spreads)
+
+class ProposedStructure(BaseModel):
+    """Stage 3 output (Claude LLM #2). Proposes full spread structure."""
+    underlying: str
+    legs: list[ProposedLeg]
+    rationale: str
+    sleeve: Literal["A", "B"]
+    max_loss_estimate: float # Model's estimated max loss ($); risk engine can only lower size
+    structure_type: str = "" # "put_credit_spread" | "call_credit_spread" | "iron_condor" | "put_debit_spread"
+    limit_price: float = 0.0 # Net limit price per spread
+
+class GateResult(BaseModel):
+    """Result from an individual risk gate in risk/gates.py."""
+    outcome: Literal["PASS", "RESIZE", "VETO"]
+    contracts: int | None = None # Positive integer if RESIZE, None otherwise
+    reason: str
+    gate_name: str
+
+class PortfolioState(BaseModel):
+    """Snapshot of account state passed into risk gates."""
+    current_nav: float
+    starting_nav: float
+    open_positions: list[dict[str, Any]] = Field(default_factory=list)
+    sector_exposure: dict[str, int] = Field(default_factory=dict)
+    last_quote_ts: dict[str, datetime] = Field(default_factory=dict)
+    reserved_capital: float = 0.0 # Running total of capital reserved for in-flight basket entry
+
+class MarketState(BaseModel):
+    """Microstructure data passed into risk gates."""
+    bid_ask_spread: dict[str, float] = Field(default_factory=dict) # symbol -> spread in USD
+    open_interest: dict[str, int] = Field(default_factory=dict)      # symbol -> total OI
+    quote_age_seconds: dict[str, float] = Field(default_factory=dict)
+    dispersion_score: float | None = None # Vega-weighted single IV / index IV ratio from Member 3
+
+class RiskDecision(BaseModel):
+    """Output of risk engine after running all 12 gates."""
+    outcome: Literal["PASS", "RESIZE", "VETO"]
+    contracts: int | None = None
+    reasons: list[str] = Field(default_factory=list) # All gates that fired
+    proposed: ProposedStructure
+
+class ScreenResult(BaseModel):
+    """Output of screen/universe.py for each candidate symbol."""
+    symbol: str
+    passed: bool
+    reason: str
+    metrics: dict[str, Any] = Field(default_factory=dict)
+```
+
+### 2. Deviations & Conflict Resolutions
+
+- **`ProposedLeg`**: The initial stub had only OCC `symbol` + `side` + `ratio_qty`. The prompt spec required explicit `expiry`, `strike`, `right`, and `contracts` so the broker and order modules can construct multi-leg requests directly. Both are preserved (`symbol` defaults to `""` if not yet resolved from contracts metadata).
+- **`ProposedStructure`**: Renamed `max_loss_usd` to `max_loss_estimate` to match prompt specification; kept `structure_type` and `limit_price` from stub as convenience fields for `execution/orders.py`.
+- **`CatalystVerdict`**: Preserved `symbol` and `sources_considered` from stub alongside `catalyst_risk` and `reasoning`.
+- **`HeadlineDigest`**: Preserved `model_used` from stub, added `Literal["low", "normal", "elevated"]` constraint and guaranteed empty string default (`""`) for `summary` so it is never `None`.
+- **`sqlmodel` / `pydantic` v2 compatibility**: Configured `[tool.hatch.build.targets.wheel]` and `[tool.hatch.build.targets.editable]` in `pyproject.toml` so editable installs with Hatchling locate `src/barbell`.
+
+### 3. Broker & Journal Details
+
+- **`AlpacaClient` (`src/barbell/broker/alpaca_client.py`)**:
+  - Only module importing `alpaca-py`.
+  - Initialized via `AlpacaClient.from_settings()`.
+  - Implements `get_account()`, `get_positions()`, `get_option_chain()`, `get_option_contracts()`, `submit_mleg_order()`, and `get_clock()`.
+  - **Hard Invariant**: `submit_mleg_order()` raises `NakedShortError` before any network call if a sell leg is not matched by a buy leg with the same expiry.
+- **`JournalStore` (`src/barbell/journal/store.py`)**:
+  - SQLite append-only log with 9 tables: `screen_results`, `catalyst_verdicts`, `proposed_structures`, `risk_decisions`, `orders`, `positions_snapshot`, `kill_switch_events`, `capital_reservations`, `basket_leg_fills`.
+  - Contains NO `UPDATE` or `DELETE` methods. Status updates for reservations or fills append new rows.
+- **`Clock` (`src/barbell/broker/clock.py`)**:
+  - All comparisons use `ZoneInfo("America/New_York")`.
+  - Functions: `is_market_open()`, `is_carry_entry_window()`, `is_carry_unwind_day()`, `is_convexity_entry_window()`, `time_to_deadline()`, `must_be_flat_by()`, `is_past_flatten_deadline()`, `is_past_nfp()`.
+
+### 4. Day-1 Verification (`scripts/verify_day1.py`)
+
+The verification script executes 7 checks against the paper API:
+1. **Account Options Level**: Checks `options_approved_level >= 3` for multi-leg spreads.
+2. **1-Lot Put Credit Spread Submission**: Submits a real 1-lot `LimitOrderRequest` with `OrderClass.MLEG` at $0.01 limit.
+3. **Greeks & IV on Basic Plan**: Checks if delta/gamma/IV are populated on `OptionsSnapshot` from Alpaca. If missing/empty, Member 3's Black-Scholes solver in `screen/metrics.py` is engaged.
+4. **Quote Staleness vs Wall Clock**: Computes quote timestamp lag against `max_quote_age_seconds` (120s).
+5. **SPX/XSP Market Data Availability**: Verifies whether index option chains return snapshots or require ETF fallback (`SPY`).
+6. **Multi-Leg Fill Simulation**: Notes paper trading fill behavior at mid vs touch.
+7. **Rate Limit Extrapolation**: Benchmarks multi-chain queries across ~25 symbols.
+
+*Note for running against live paper credentials*: Run `python scripts/seed_paper_account.py` and `python scripts/verify_day1.py` once `.env` is populated with real paper API keys.
