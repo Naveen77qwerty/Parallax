@@ -286,3 +286,101 @@ The verification script executes 7 checks against the paper API:
 7. **Rate Limit Extrapolation**: Benchmarks multi-chain queries across ~25 symbols.
 
 *Note for running against live paper credentials*: Run `python scripts/seed_paper_account.py` and `python scripts/verify_day1.py` once `.env` is populated with real paper API keys.
+
+## Member 2 handoff
+
+Risk engine, execution layer, and reconciliation are fully implemented and tested.
+
+### 1. TODO-stubbed gates pending Member 4's `endgame/schedule.py`
+
+Two gates return **PASS unconditionally** with a `# TODO(Member 4)` comment:
+
+| Gate | Function | What it needs | Where to wire |
+|------|----------|---------------|---------------|
+| Pre-NFP flatten | `gate_pre_nfp_flatten` | `endgame/schedule.py`'s `current_phase()` returning `HOLD_THROUGH_NFP` / `FLAT` | `risk/gates.py` lines ~220–240 |
+| Expiry past deadline | `gate_expiry_past_deadline` | `calendar.submission_deadline_et` from settings (can also be read directly from config without schedule.py) | `risk/gates.py` lines ~255–270 |
+
+**Critical**: these stubs return PASS so the pipeline runs during BUILD/CARRY_ACTIVE phases. Once Member 4 ships `schedule.py`, both gates must be wired immediately — leaving them as PASS stubs past the last carry entry day would allow entries during FLAT phase.
+
+Note on `gate_expiry_past_deadline`: the submission deadline is already in `config/settings.yaml` as `calendar.submission_deadline_et`. This gate can be wired independently of Member 4 by reading `get_settings().calendar.submission_deadline_et` directly. Consider doing this if Member 4 is delayed.
+
+### 2. Final `RiskDecision` / `GateResult` shape (no drift)
+
+The shapes used in implementation match `agent/schemas.py` exactly — no shadow versions created, no fields renamed or added. Confirmed final shapes:
+
+```python
+class GateResult(BaseModel):
+    outcome: Literal["PASS", "RESIZE", "VETO"]
+    contracts: int | None = None  # positive when RESIZE, None otherwise
+    reason: str
+    gate_name: str
+
+class RiskDecision(BaseModel):
+    outcome: Literal["PASS", "RESIZE", "VETO"]
+    contracts: int | None = None  # None when VETO
+    reasons: list[str]            # ALL gate reasons (not just the deciding one)
+    proposed: ProposedStructure
+```
+
+### 3. One schema addition (additive, backward-compatible)
+
+`MarketState` in `agent/schemas.py` has one new field:
+
+```python
+reconciliation_diverged: bool = False
+```
+
+Defaults `False` so all existing callers (Member 3's screen gates, tests without reconcile, etc.) are unaffected. `execution/reconcile.py`'s `reconcile()` returns a `ReconciliationReport` with a `diverged` flag; callers set `market_state.reconciliation_diverged = recon.diverged` before calling `engine.evaluate()`. Gate 12 (`gate_broker_reconciliation`) reads this field.
+
+### 4. Gate ordering (fixed, never reorder)
+
+Gates run in this exact sequence in `risk/gates.py::GATE_PIPELINE`. Changing the order changes semantics (e.g., kill-switch must check before liquidity gates so we don't waste time on market data when the account is frozen):
+
+```
+01 gate_per_position_loss_cap        RESIZE-capable
+02 gate_portfolio_loss_cap           RESIZE-capable
+03 gate_defined_risk_only            VETO-only (defense in depth vs alpaca_client)
+04 gate_quote_staleness              VETO-only
+05 gate_liquidity_floor              VETO-only
+06 gate_dispersion_score             VETO-only (PASS if None — see below)
+07 gate_earnings_blackout            VETO-only
+08 gate_pre_nfp_flatten              STUB (PASS) — TODO(Member 4)
+09 gate_expiry_past_deadline         STUB (PASS) — TODO(Member 4)
+10 gate_concentration                VETO-only
+11 gate_drawdown_kill_switch         VETO-only (delegates to kill_switch.py)
+12 gate_broker_reconciliation        VETO-only (wired to reconcile.py)
+13 gate_basket_capital_reservation   VETO-only (new)
+```
+
+### 5. Dispersion score gate behavior when `dispersion_score is None`
+
+Gate 06 returns **PASS** (not VETO) when `market_state.dispersion_score is None`. This is intentional — see the detailed comment in `gate_dispersion_score()`. Short version: VETO on None would silently disable all Sleeve A entries until Member 3 wires `screen/metrics.py`. The other 12 gates all still run and enforce real risk constraints. Once Member 3 populates `dispersion_score`, the gate automatically starts enforcing the floor.
+
+### 6. Basket execution architecture (for Member 4's scheduler wiring)
+
+`execution/orders.py` exposes:
+
+```python
+submit_basket(
+    proposals: list[ProposedStructure],
+    *,
+    client: AlpacaClient,
+    store: JournalStore,
+    exec_config: ExecutionConfig,
+    risk_config: RiskGateConfig,
+    engine_config: RiskGateConfig,
+    portfolio_state_fn: Callable[[], PortfolioState],
+    market_state_fn: Callable[[], MarketState],
+    cycle_id: str,
+) -> list[dict]
+```
+
+Member 4's `scheduler/loop.py` calls this once per cycle with the list of approved `ProposedStructure` objects. The two callable arguments (`portfolio_state_fn`, `market_state_fn`) are called fresh after each leg fill to get current portfolio/market state for the post-fill risk re-evaluation.
+
+### 7. Credit spreads vs. cash-secured puts (verify_day1.py item 2)
+
+The `gate_defined_risk_only` check requires every SELL leg to have a BUY leg with the same expiry in the same order. Credit spreads (sell + buy same expiry) pass this check. Cash-secured puts (naked sell with cash as collateral) **would fail** this gate and be VETOd — this is by design (CLAUDE.md: "no naked shorts, ever"). The architecture's choice of put credit spreads over CSPs is therefore enforced at the risk engine layer, not just by documentation. Nothing in verify_day1.py changes this; item 2 confirms multi-leg order submission works, which is required for the spread structure.
+
+### 8. Kill-switch persistence
+
+`risk/kill_switch.py` persists latch state through `journal/store.py`'s `kill_switch_events` table. On process restart, `is_latched()` queries the DB for any row with `triggered=True`. No local fallback table is needed — the table already exists from Member 1. `reset_in_process_cache()` is a test-only function to allow test isolation between kill-switch scenarios.
