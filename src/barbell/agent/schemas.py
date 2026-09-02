@@ -185,6 +185,11 @@ class MarketState(BaseModel):
     # Computed in screen/metrics.py — read by gates in risk/gates.py
     dispersion_score: float | None = None    # NEW: vega-weighted single-IV/index-IV
 
+    # Set by execution/reconcile.py before calling risk/engine.py.
+    # True = broker state diverged from journal → broker-reconciliation gate VETOs.
+    # Default False so callers that don't run reconcile (unit tests, etc.) pass cleanly.
+    reconciliation_diverged: bool = False
+
     model_config = {"arbitrary_types_allowed": True}
 
 
