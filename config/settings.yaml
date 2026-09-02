@@ -1,0 +1,66 @@
+# Central config. The risk engine reads these limits directly — nothing here
+# is a suggestion; gates.py enforces every number in this file.
+
+account:
+  starting_nav: 100000.0
+
+calendar:
+  # Judged window as UTC-aware ET sessions. The endgame state machine keys off these.
+  first_full_session: 2026-08-31
+  last_carry_entry_day: 2026-09-02
+  carry_unwind_day: 2026-09-03
+  convexity_entry_day: 2026-09-03
+  convexity_entry_after_et: "14:30"
+  submission_deadline_et: "2026-09-04T11:00:00"
+  flatten_by_et: "2026-09-04T10:45:00"
+  nfp_release_et: "2026-09-04T08:30:00"
+
+sleeve_a_carry:
+  enabled: true
+  structure: ["put_credit_spread", "iron_condor"]
+  spread_width_usd: 5.0
+  short_delta_range: [0.20, 0.25]
+  dte_range: [3, 7]
+  target_names: 12
+  min_names: 8
+  profit_take_pct_of_credit: 0.50
+  screen:
+    min_open_interest: 500
+    max_spread_pct_of_mid: 0.08
+    min_iv_rank: 50
+    min_iv30_hv20_ratio: 1.15
+    earnings_blackout: true
+    min_dispersion_score: 1.15   # vega-weighted single-name IV / index IV floor — gates Sleeve A sizing
+
+sleeve_b_convexity:
+  enabled: true
+  underlying: "SPY"
+  structure: "put_debit_spread"
+  long_delta_target: 0.30
+  short_delta_target: 0.10
+  expiry_offset_days_past_deadline: 7   # expire well past Sep 4
+  base_risk_pct_nav: 0.014
+  escalated_risk_pct_nav: 0.028
+  escalate_if_nav_above_start: true
+
+risk_gates:
+  max_loss_per_position_pct_nav: 0.008
+  max_loss_portfolio_pct_nav: 0.12
+  basket_reserve_before_first_leg: true   # execution/orders.py refuses to submit leg 1 without a journaled reservation covering the full proposed basket
+  max_quote_age_seconds: 120
+  max_sector_concentration: 3
+  max_positions_per_underlying: 1
+  drawdown_kill_switch_pct_nav: -0.08
+  max_slippage_pct_of_mid: 0.10
+  order_retry_limit: 3
+  order_retry_widen_pct: 0.02
+
+execution:
+  order_type: "limit"          # never "market" for options — enforced in code, not just config
+  time_in_force: "day"
+  poll_interval_seconds: 5
+  fill_timeout_seconds: 90
+
+scheduler:
+  cycle_interval_minutes: 30
+  market_hours_only: true

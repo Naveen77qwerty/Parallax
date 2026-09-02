@@ -1,0 +1,19 @@
+# Seed candidate universe for Sleeve A screening. Deliberately liquid, optionable,
+# sector-diverse names — the screen in screen/universe.py filters this list further
+# by live IV rank / IV30-HV20 / liquidity; it does not expand it.
+# Fill in / prune after Day-1 verification (scripts/verify_day1.py).
+
+candidates:
+  technology: [NVDA, AMD, AVGO, CRM, ORCL]
+  consumer: [TSLA, AMZN, SBUX, NKE]
+  financials: [JPM, GS, COIN]
+  healthcare: [UNH, LLY]
+  energy: [XOM, OXY]
+  communication: [META, NFLX, DIS]
+
+index_hedge_underlying: SPY
+
+exclude:
+  # Names with confirmed earnings inside the window go here as soon as verified —
+  # earnings_blackout in settings.yaml checks this list first, before calling the API.
+  []
