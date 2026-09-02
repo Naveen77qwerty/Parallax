@@ -384,3 +384,79 @@ The `gate_defined_risk_only` check requires every SELL leg to have a BUY leg wit
 ### 8. Kill-switch persistence
 
 `risk/kill_switch.py` persists latch state through `journal/store.py`'s `kill_switch_events` table. On process restart, `is_latched()` queries the DB for any row with `triggered=True`. No local fallback table is needed — the table already exists from Member 1. `reset_in_process_cache()` is a test-only function to allow test isolation between kill-switch scenarios.
+
+---
+
+## Member 3 handoff
+
+Screening, metrics, and both LLM stages are fully implemented and tested. 47 tests pass (zero live API calls).
+
+### 1. Files delivered
+
+| File | Status |
+|---|---|
+| `src/barbell/screen/metrics.py` | Complete — `iv_rank`, `iv30_hv20_ratio`, `bs_implied_vol`, `bs_greeks`, `dispersion_score` |
+| `src/barbell/screen/universe.py` | Complete — `load_candidates`, `screen` with 4 numeric filters + dispersion wiring |
+| `src/barbell/screen/headline_triage.py` | Complete — `digest_headlines` via Featherless/OpenAI SDK, full fail-safe |
+| `src/barbell/agent/catalyst_gate.py` | Complete — `check_catalyst` with Anthropic tool-use, fail-closed on every error path |
+| `src/barbell/agent/structure_agent.py` | Complete — `propose_structure` with Anthropic tool-use, no broker calls |
+| `src/barbell/agent/prompts/catalyst_gate.md` | Complete |
+| `src/barbell/agent/prompts/structure_agent.md` | Complete |
+| `tests/test_screen.py` | 32 tests — arithmetic, filter rejection cases, journal row confirmation, dispersion_score hand-computed |
+| `tests/test_agent.py` | 15 tests — both LLM stages, fail-closed cases |
+| `tests/fixtures/option_chain.json` | NVDA, AMD, SBUX (low liquidity), SPY fixture chains |
+
+### 2. Data path: Black-Scholes fallback active
+
+Based on Member 1's `verify_day1.py` item 3 (native Greeks/IV from Basic plan unreliable for short-DTE snapshots):
+
+- **Primary**: reads `snapshot.implied_volatility` and `snapshot.greeks.vega` when non-zero.
+- **Fallback**: calls `bs_greeks()` from `screen/metrics.py` for vega when native Greeks are missing.
+- **Synthetic IV rank / HV**: when 52-week IV history and close-price bars are unavailable, `_compute_iv_rank` uses equity IV band 0.15–0.80 and `_compute_iv30_hv20_ratio` approximates HV20 as 80% of IV30. Member 4 should wire real bar data if a higher data plan becomes available.
+
+### 3. dispersion_score — computation and location
+
+Computed in `screen/universe.py::screen()` after all numeric filters pass, using:
+
+```
+dispersion_score(survivors, index_iv=_get_index_iv(client, "SPY"))
+```
+
+Stored in `MarketState.dispersion_score` (type `float | None`). Member 2's `gate_dispersion_score` reads it from there — **no schema drift**.
+
+Journal logging: per-symbol `ScreenResult.metrics` carries `iv`, `iv_rank`, `iv30_hv20_ratio`, `vega_per_contract`, `proposed_contracts`, `spot`. The portfolio-level dispersion score is logged at INFO each cycle.
+
+### 4. Schema conformance (no drift)
+
+All schemas imported from `barbell.agent.schemas` — no shadow copies created. `MarketState.reconciliation_diverged` (Member 2 addition, `False` default) is preserved and untouched by this module.
+
+### 5. Wiring for Member 4
+
+```python
+candidates = load_candidates()
+all_results, market_state = screen(candidates, client, store, cycle_id)
+survivors = [r for r in all_results if r.passed]
+
+proposals = []
+for result in survivors:
+    headlines = []  # wire news API here
+    digest = digest_headlines(result.symbol, headlines)   # never raises
+    verdict = check_catalyst(result.symbol, headlines, digest, result)
+    if verdict.catalyst_risk:
+        continue
+    chain = client.get_option_chain(result.symbol, ...)
+    try:
+        structure = propose_structure(result.symbol, chain, result,
+                                      dispersion_score=market_state.dispersion_score)
+        proposals.append(structure)
+    except Exception as exc:
+        log.warning("propose_structure(%s) failed: %s", result.symbol, exc)
+
+# Pass proposals + market_state into execution.orders.submit_basket()
+```
+
+### 6. Known TODOs for Member 4
+
+- **Real bar data**: replace synthetic HV/IV-rank fallbacks when a higher data plan is available.
+- **News API**: `digest_headlines` is called with an empty list in the skeleton — wire a real news source.
+- **Dispersion score time-series**: currently INFO-logged. Add a queryable column to `ScreenResultRow` or a separate table if the write-up requires a week-long trend chart.
