@@ -31,5 +31,11 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/barbell"]
+
+[tool.hatch.build.targets.editable]
+packages = ["src/barbell"]
+
 [tool.ruff]
 line-length = 100
