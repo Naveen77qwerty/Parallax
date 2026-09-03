@@ -24,7 +24,7 @@ def mock_settings(monkeypatch):
     monkeypatch.setenv("ALPACA_API_KEY", "test_key")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "test_secret")
     monkeypatch.setenv("ALPACA_PAPER_TRADE", "true")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test_anthropic_key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test_gemini_key")
     monkeypatch.setenv("BARBELL_DB_PATH", "data/test.db")
     monkeypatch.setenv("BARBELL_LOG_LEVEL", "INFO")
 

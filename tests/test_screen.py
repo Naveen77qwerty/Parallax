@@ -268,8 +268,8 @@ def mock_settings(tmp_path):
         featherless_api_key="",
         featherless_base_url="https://api.featherless.ai/v1",
         featherless_model="Qwen/Qwen2.5-7B-Instruct",
-        anthropic_api_key="test-key",
-        claude_model="claude-opus-4-5",
+        gemini_api_key="test-key",
+        gemini_model="gemini-2.5-flash",
     )
     with patch("barbell.screen.universe.get_settings", return_value=settings):
         yield settings
@@ -519,8 +519,8 @@ class TestHeadlineTriage:
 class TestCatalystGate:
     def _settings(self):
         return SimpleNamespace(
-            anthropic_api_key="test-key",
-            claude_model="claude-opus-4-5",
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-flash",
             sleeve_a_carry=SimpleNamespace(
                 screen=SimpleNamespace(min_iv_rank=50),
                 dte_range=[3, 7],
@@ -531,22 +531,18 @@ class TestCatalystGate:
         )
 
     def test_well_formed_response_parses(self):
-        from barbell.agent.catalyst_gate import check_catalyst
+        from barbell.agent.catalyst_gate import _CatalystVerdictSchema, check_catalyst
 
-        tool_block = SimpleNamespace(
-            type="tool_use",
-            name="record_catalyst_verdict",
-            input={
-                "catalyst_risk": False,
-                "reasoning": "No pending binary events found.",
-                "sources_considered": ["Q3 earnings already reported"],
-            },
+        parsed = _CatalystVerdictSchema(
+            catalyst_risk=False,
+            reasoning="No pending binary events found.",
+            sources_considered=["Q3 earnings already reported"],
         )
-        mock_response = SimpleNamespace(content=[tool_block])
+        mock_response = SimpleNamespace(parsed=parsed, text=parsed.model_dump_json())
 
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=self._settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = mock_response
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = mock_response
             result = check_catalyst("NVDA", ["Earnings beat"])
 
         assert result.catalyst_risk is False
@@ -556,26 +552,25 @@ class TestCatalystGate:
     def test_malformed_response_returns_catalyst_risk_true(self):
         from barbell.agent.catalyst_gate import check_catalyst
 
-        # No tool_use block in response
-        text_block = SimpleNamespace(type="text", text="I cannot determine this.")
-        mock_response = SimpleNamespace(content=[text_block])
+        # Gemini failed to produce a schema-conformant response
+        mock_response = SimpleNamespace(parsed=None, text="I cannot determine this.")
 
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=self._settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = mock_response
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = mock_response
             result = check_catalyst("NVDA", ["Some headline"])
 
         assert result.catalyst_risk is True
         assert "fail-closed" in result.reasoning
 
     def test_api_error_returns_catalyst_risk_true(self):
-        import anthropic as _anthropic
+        from google.genai import errors as genai_errors
         from barbell.agent.catalyst_gate import check_catalyst
 
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=self._settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.side_effect = _anthropic.APIError(
-                message="rate limit", request=MagicMock(), body={}
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.side_effect = genai_errors.APIError(
+                429, {"message": "rate limit"}
             )
             result = check_catalyst("NVDA", [])
 

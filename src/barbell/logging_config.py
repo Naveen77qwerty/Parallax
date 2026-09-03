@@ -60,7 +60,7 @@ def setup_logging(level: str | None = None) -> logging.Logger:
 
     # Silence noisy third-party loggers at WARNING unless DEBUG is requested
     if numeric_level > logging.DEBUG:
-        for noisy in ("httpx", "httpcore", "urllib3", "alpaca", "anthropic"):
+        for noisy in ("httpx", "httpcore", "urllib3", "alpaca", "google_genai"):
             logging.getLogger(noisy).setLevel(logging.WARNING)
 
     _CONFIGURED = True

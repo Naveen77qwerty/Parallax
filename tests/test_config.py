@@ -23,8 +23,8 @@ def mock_env(monkeypatch):
     monkeypatch.setenv("ALPACA_SECRET_KEY", "test_secret")
     monkeypatch.setenv("ALPACA_PAPER_TRADE", "true")
     monkeypatch.setenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test_anthropic_key")
-    monkeypatch.setenv("CLAUDE_MODEL", "claude-opus-4-5")
+    monkeypatch.setenv("GEMINI_API_KEY", "test_gemini_key")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash")
     monkeypatch.setenv("BARBELL_ENV", "paper")
     monkeypatch.setenv("BARBELL_DB_PATH", "data/test_barbell.db")
     monkeypatch.setenv("BARBELL_LOG_LEVEL", "INFO")
@@ -64,7 +64,7 @@ def test_load_settings_success(mock_env):
         "ALPACA_API_KEY",
         "ALPACA_SECRET_KEY",
         "ALPACA_PAPER_TRADE",
-        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
         "BARBELL_DB_PATH",
         "BARBELL_LOG_LEVEL",
     ],
@@ -76,7 +76,7 @@ def test_missing_required_env_var_raises(monkeypatch, missing_var):
         "ALPACA_API_KEY": "k",
         "ALPACA_SECRET_KEY": "s",
         "ALPACA_PAPER_TRADE": "true",
-        "ANTHROPIC_API_KEY": "a",
+        "GEMINI_API_KEY": "a",
         "BARBELL_DB_PATH": "data/barbell.db",
         "BARBELL_LOG_LEVEL": "INFO",
     }

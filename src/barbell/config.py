@@ -16,13 +16,13 @@ name if missing, never a generic KeyError):
     ALPACA_API_KEY
     ALPACA_SECRET_KEY
     ALPACA_PAPER_TRADE
-    ANTHROPIC_API_KEY
+    GEMINI_API_KEY
     BARBELL_DB_PATH
     BARBELL_LOG_LEVEL
 
 Optional (have defaults in .env.example):
     ALPACA_BASE_URL
-    CLAUDE_MODEL
+    GEMINI_MODEL
     FEATHERLESS_API_KEY
     FEATHERLESS_BASE_URL
     FEATHERLESS_MODEL
@@ -181,8 +181,8 @@ class Settings(BaseModel):
     alpaca_paper_trade: bool
     alpaca_base_url: str
 
-    anthropic_api_key: str
-    claude_model: str
+    gemini_api_key: str
+    gemini_model: str
 
     featherless_api_key: str
     featherless_base_url: str
@@ -227,7 +227,7 @@ def get_settings() -> Settings:
         "ALPACA_API_KEY",
         "ALPACA_SECRET_KEY",
         "ALPACA_PAPER_TRADE",
-        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
         "BARBELL_DB_PATH",
         "BARBELL_LOG_LEVEL",
     ]
@@ -257,8 +257,8 @@ def get_settings() -> Settings:
         alpaca_secret_key=os.environ["ALPACA_SECRET_KEY"],
         alpaca_paper_trade=alpaca_paper,
         alpaca_base_url=os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"),
-        anthropic_api_key=os.environ["ANTHROPIC_API_KEY"],
-        claude_model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-5"),
+        gemini_api_key=os.environ["GEMINI_API_KEY"],
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
         featherless_api_key=os.environ.get("FEATHERLESS_API_KEY", ""),
         featherless_base_url=os.environ.get(
             "FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"

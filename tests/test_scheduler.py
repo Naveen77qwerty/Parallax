@@ -41,7 +41,7 @@ def mock_store(tmp_path):
     os.environ.setdefault("ALPACA_API_KEY", "test")
     os.environ.setdefault("ALPACA_SECRET_KEY", "test")
     os.environ.setdefault("ALPACA_PAPER_TRADE", "true")
-    os.environ.setdefault("ANTHROPIC_API_KEY", "test")
+    os.environ.setdefault("GEMINI_API_KEY", "test")
     os.environ.setdefault("BARBELL_DB_PATH", str(tmp_path / "test.db"))
     os.environ.setdefault("BARBELL_LOG_LEVEL", "DEBUG")
 

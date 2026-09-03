@@ -46,9 +46,11 @@ design: docs/architecture.md. Full 4-person build plan: docs/TEAM_BUILD_PROMPTS.
 
 ## Stack
 
-Python 3.11+, alpaca-py, anthropic SDK, openai SDK (pointed at Featherless
-for screen/headline_triage.py only), pydantic v2, sqlmodel, APScheduler,
-pyyaml + python-dotenv, pytest + freezegun, Streamlit (dashboard, optional).
+Python 3.11+, alpaca-py, google-genai SDK (Gemini — catalyst_gate.py +
+structure_agent.py, the two decisions with real veto/sizing power), openai
+SDK (pointed at Featherless for screen/headline_triage.py only), pydantic
+v2, sqlmodel, APScheduler, pyyaml + python-dotenv, pytest + freezegun,
+Streamlit (dashboard, optional).
 
 ## Style
 

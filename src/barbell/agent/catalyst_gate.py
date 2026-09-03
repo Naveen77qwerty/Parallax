@@ -4,13 +4,14 @@ for why the LLM's role is split and kept out of order construction).
 
     check_catalyst(symbol: str, headlines: list[str], digest: HeadlineDigest | None) -> CatalystVerdict
 
-Calls the Anthropic API with prompts/catalyst_gate.md, tool-forces a
-CatalystVerdict-shaped response, and returns the parsed model. Anything that
-fails schema validation is treated as catalyst_risk=True (fail closed, not open).
+Calls the Gemini API with prompts/catalyst_gate.md, forces a
+CatalystVerdict-shaped JSON response via response_schema, and returns the
+parsed model. Anything that fails schema validation is treated as
+catalyst_risk=True (fail closed, not open).
 
 `digest` is the optional output of screen/headline_triage.py (Featherless,
 open-source model) — included in the prompt as extra context ("a cheap
-first pass flagged elevated news volume; verify why") but Claude alone
+first pass flagged elevated news volume; verify why") but Gemini alone
 produces catalyst_risk. A missing digest changes nothing about this
 function's behavior, by design.
 """
@@ -20,7 +21,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import anthropic
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
+from pydantic import BaseModel, Field
 
 from barbell.agent.schemas import CatalystVerdict, HeadlineDigest, ScreenResult
 from barbell.config import get_settings
@@ -29,43 +33,34 @@ log = logging.getLogger(__name__)
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "catalyst_gate.md"
 
-# Tool schema that forces Claude to output a CatalystVerdict-shaped response
-_TOOL_SCHEMA = {
-    "name": "record_catalyst_verdict",
-    "description": (
-        "Submit your catalyst risk decision for this symbol. "
-        "You MUST call this tool exactly once."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "catalyst_risk": {
-                "type": "boolean",
-                "description": (
-                    "True if there is an active unscheduled/unpriced binary risk "
-                    "that makes selling premium dangerous. False if IV is elevated "
-                    "for a known, already-priced reason."
-                ),
-            },
-            "reasoning": {
-                "type": "string",
-                "description": (
-                    "1–3 sentences explaining the specific evidence (or lack of it) "
-                    "that drove your decision."
-                ),
-            },
-            "sources_considered": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "List of specific headline items or data points you weighted most "
-                    "heavily. Empty list is acceptable if no headlines were provided."
-                ),
-            },
-        },
-        "required": ["catalyst_risk", "reasoning"],
-    },
-}
+
+class _CatalystVerdictSchema(BaseModel):
+    """LLM-facing response schema for check_catalyst().
+
+    Gemini only ever decides these three fields — `symbol` is supplied by
+    the caller, never asked of the model, so it can't invent the wrong one.
+    """
+
+    catalyst_risk: bool = Field(
+        description=(
+            "True if there is an active unscheduled/unpriced binary risk "
+            "that makes selling premium dangerous. False if IV is elevated "
+            "for a known, already-priced reason."
+        )
+    )
+    reasoning: str = Field(
+        description=(
+            "1–3 sentences explaining the specific evidence (or lack of it) "
+            "that drove your decision."
+        )
+    )
+    sources_considered: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of specific headline items or data points you weighted most "
+            "heavily. Empty list is acceptable if no headlines were provided."
+        ),
+    )
 
 
 def check_catalyst(
@@ -99,15 +94,15 @@ def check_catalyst(
 
     try:
         prompt_text = _build_prompt(symbol, headlines, digest, screen_result)
-        verdict = _call_anthropic(symbol, prompt_text)
+        verdict = _call_gemini(symbol, prompt_text)
         return verdict
 
-    except anthropic.APIError as exc:
-        log.error("check_catalyst(%s): Anthropic API error: %s", symbol, exc)
+    except genai_errors.APIError as exc:
+        log.error("check_catalyst(%s): Gemini API error: %s", symbol, exc)
         return CatalystVerdict(
             symbol=symbol,
             catalyst_risk=True,
-            reasoning=f"{fail_closed_prefix}: Anthropic API error — {exc}",
+            reasoning=f"{fail_closed_prefix}: Gemini API error — {exc}",
             sources_considered=[],
         )
     except ValueError as exc:
@@ -170,63 +165,41 @@ def _build_prompt(
     return rendered
 
 
-def _call_anthropic(symbol: str, prompt_text: str) -> CatalystVerdict:
+def _call_gemini(symbol: str, prompt_text: str) -> CatalystVerdict:
     """
-    Call the Anthropic API with tool-forcing and parse the CatalystVerdict.
+    Call the Gemini API with a forced JSON schema and parse the CatalystVerdict.
 
-    Raises ValueError if the tool response doesn't conform to the schema.
-    Raises anthropic.APIError on API-level failures (callers handle these).
+    Raises ValueError if the response doesn't conform to the schema.
+    Raises genai_errors.APIError on API-level failures (callers handle these).
     """
     s = get_settings()
-    client = anthropic.Anthropic(api_key=s.anthropic_api_key)
+    client = genai.Client(api_key=s.gemini_api_key)
 
-    response = client.messages.create(
-        model=s.claude_model,
-        max_tokens=512,
-        tools=[_TOOL_SCHEMA],
-        tool_choice={"type": "tool", "name": "record_catalyst_verdict"},
-        messages=[
-            {
-                "role": "user",
-                "content": prompt_text,
-            }
-        ],
+    response = client.models.generate_content(
+        model=s.gemini_model,
+        contents=prompt_text,
+        config=genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_CatalystVerdictSchema,
+        ),
     )
 
-    # Extract tool use block
-    tool_use_block = None
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "record_catalyst_verdict":
-            tool_use_block = block
-            break
-
-    if tool_use_block is None:
+    parsed = response.parsed
+    if not isinstance(parsed, _CatalystVerdictSchema):
         raise ValueError(
-            f"Claude did not call record_catalyst_verdict for {symbol}; "
-            f"got content blocks: {[b.type for b in response.content]}"
+            f"Gemini did not return a schema-conformant response for {symbol}; "
+            f"got: {getattr(response, 'text', None)!r}"
         )
 
-    inp = tool_use_block.input
-    if not isinstance(inp, dict):
-        raise ValueError(f"tool input is not a dict: {inp!r}")
-
-    catalyst_risk = inp.get("catalyst_risk")
-    if not isinstance(catalyst_risk, bool):
-        raise ValueError(f"catalyst_risk must be bool, got {catalyst_risk!r}")
-
-    reasoning = str(inp.get("reasoning", ""))
+    reasoning = str(parsed.reasoning or "")
     if not reasoning:
         raise ValueError("reasoning is required and must be non-empty")
 
-    sources = inp.get("sources_considered", [])
-    if not isinstance(sources, list):
-        sources = []
-
     verdict = CatalystVerdict(
         symbol=symbol,
-        catalyst_risk=bool(catalyst_risk),
+        catalyst_risk=bool(parsed.catalyst_risk),
         reasoning=reasoning,
-        sources_considered=[str(s_) for s_ in sources],
+        sources_considered=[str(s_) for s_ in (parsed.sources_considered or [])],
     )
     log.info(
         "check_catalyst(%s): catalyst_risk=%s — %s",

@@ -5,7 +5,7 @@ description = "Autonomous options agent for the Alpaca AI Trading Agents Hackath
 requires-python = ">=3.11"
 dependencies = [
     "alpaca-py>=0.33",
-    "anthropic>=0.40",
+    "google-genai>=1.0",   # catalyst_gate.py + structure_agent.py — the two decisions with real veto/sizing power
     "openai>=1.50",   # points at Featherless's OpenAI-compatible endpoint, headline_triage.py only
     "pydantic>=2.9",
     "pyyaml>=6.0",

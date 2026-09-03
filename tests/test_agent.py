@@ -1,7 +1,7 @@
 """
 Tests for agent/catalyst_gate.py and agent/structure_agent.py.
 
-Both Anthropic and Featherless are fully mocked — no live API calls.
+Both Gemini and Featherless are fully mocked — no live API calls.
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from barbell.agent.schemas import (
 
 def _base_settings():
     return SimpleNamespace(
-        anthropic_api_key="test-key",
-        claude_model="claude-opus-4-5",
+        gemini_api_key="test-key",
+        gemini_model="gemini-2.5-flash",
         featherless_api_key="fl-test-key",
         featherless_base_url="https://api.featherless.ai/v1",
         featherless_model="Qwen/Qwen2.5-7B-Instruct",
@@ -43,9 +43,45 @@ def _base_settings():
     )
 
 
-def _tool_response(name: str, input_dict: dict) -> SimpleNamespace:
-    block = SimpleNamespace(type="tool_use", name=name, input=input_dict)
-    return SimpleNamespace(content=[block])
+def _catalyst_response(catalyst_risk: bool, reasoning: str, sources=None) -> SimpleNamespace:
+    """Build a fake genai response whose .parsed is a real _CatalystVerdictSchema."""
+    from barbell.agent.catalyst_gate import _CatalystVerdictSchema
+
+    parsed = _CatalystVerdictSchema(
+        catalyst_risk=catalyst_risk,
+        reasoning=reasoning,
+        sources_considered=sources or [],
+    )
+    return SimpleNamespace(parsed=parsed, text=parsed.model_dump_json())
+
+
+def _structure_response(**overrides) -> SimpleNamespace:
+    """Build a fake genai response whose .parsed is a real _ProposedStructureSchema."""
+    from barbell.agent.structure_agent import _ProposedLegSchema, _ProposedStructureSchema
+
+    legs = overrides.pop("legs", None)
+    if legs is None:
+        legs = [
+            _ProposedLegSchema(expiry="2026-09-05", strike=110.0, right="put", side="sell", contracts=1),
+            _ProposedLegSchema(expiry="2026-09-05", strike=105.0, right="put", side="buy", contracts=1),
+        ]
+    fields = {
+        "underlying": "NVDA",
+        "sleeve": "A",
+        "structure_type": "put_credit_spread",
+        "rationale": "Put skew elevated; ATM put delta ≈ 0.22; dispersion score 3.2.",
+        "max_loss_estimate": 500.0,
+        "limit_price": 1.50,
+        "legs": legs,
+    }
+    fields.update(overrides)
+    parsed = _ProposedStructureSchema(**fields)
+    return SimpleNamespace(parsed=parsed, text=parsed.model_dump_json())
+
+
+def _bad_response(text: str = "I'm unsure.") -> SimpleNamespace:
+    """Simulate a response that failed schema validation — .parsed is None."""
+    return SimpleNamespace(parsed=None, text=text)
 
 
 # ---------------------------------------------------------------------------
@@ -59,17 +95,14 @@ class TestCatalystGateFull:
     def test_catalyst_risk_false_parsed(self):
         from barbell.agent.catalyst_gate import check_catalyst
 
-        resp = _tool_response(
-            "record_catalyst_verdict",
-            {
-                "catalyst_risk": False,
-                "reasoning": "Q3 earnings already reported; IV resetting lower.",
-                "sources_considered": ["earnings report headline"],
-            },
+        resp = _catalyst_response(
+            False,
+            "Q3 earnings already reported; IV resetting lower.",
+            sources=["earnings report headline"],
         )
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("NVDA", ["Earnings beat"])
 
         assert isinstance(result, CatalystVerdict)
@@ -81,17 +114,14 @@ class TestCatalystGateFull:
     def test_catalyst_risk_true_parsed(self):
         from barbell.agent.catalyst_gate import check_catalyst
 
-        resp = _tool_response(
-            "record_catalyst_verdict",
-            {
-                "catalyst_risk": True,
-                "reasoning": "Active FDA PDUFA date in 5 days — binary outcome unpriced.",
-                "sources_considered": ["FDA headline"],
-            },
+        resp = _catalyst_response(
+            True,
+            "Active FDA PDUFA date in 5 days — binary outcome unpriced.",
+            sources=["FDA headline"],
         )
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("BIOC", ["FDA decision imminent"])
 
         assert result.catalyst_risk is True
@@ -99,25 +129,24 @@ class TestCatalystGateFull:
     def test_no_tool_block_fails_closed(self):
         from barbell.agent.catalyst_gate import check_catalyst
 
-        text_block = SimpleNamespace(type="text", text="I'm unsure.")
-        resp = SimpleNamespace(content=[text_block])
+        resp = _bad_response("I'm unsure.")
 
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("NVDA", [])
 
         assert result.catalyst_risk is True
         assert "fail-closed" in result.reasoning
 
     def test_api_exception_fails_closed(self):
-        import anthropic as _ant
+        from google.genai import errors as genai_errors
         from barbell.agent.catalyst_gate import check_catalyst
 
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.side_effect = _ant.APIError(
-                message="503 Service Unavailable", request=MagicMock(), body={}
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.side_effect = genai_errors.APIError(
+                503, {"message": "Service Unavailable"}
             )
             result = check_catalyst("NVDA", [])
 
@@ -127,13 +156,11 @@ class TestCatalystGateFull:
     def test_missing_reasoning_field_fails_closed(self):
         from barbell.agent.catalyst_gate import check_catalyst
 
-        resp = _tool_response(
-            "record_catalyst_verdict",
-            {"catalyst_risk": False},  # missing "reasoning"
-        )
+        resp = _catalyst_response(False, "")  # empty reasoning
+
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("NVDA", [])
 
         assert result.catalyst_risk is True
@@ -143,14 +170,7 @@ class TestCatalystGateFull:
         """Verify that a HeadlineDigest is accepted without raising."""
         from barbell.agent.catalyst_gate import check_catalyst
 
-        resp = _tool_response(
-            "record_catalyst_verdict",
-            {
-                "catalyst_risk": False,
-                "reasoning": "No binary risk detected.",
-                "sources_considered": [],
-            },
-        )
+        resp = _catalyst_response(False, "No binary risk detected.", sources=[])
         digest = HeadlineDigest(symbol="AMD", news_volume="elevated", summary="Big move.")
         screen_r = ScreenResult(
             symbol="AMD", passed=True, reason="ok",
@@ -158,8 +178,8 @@ class TestCatalystGateFull:
         )
 
         with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("AMD", ["Headline"], digest=digest, screen_result=screen_r)
 
         assert isinstance(result, CatalystVerdict)
@@ -171,37 +191,6 @@ class TestCatalystGateFull:
 
 
 class TestStructureAgent:
-    def _valid_legs(self):
-        return [
-            {
-                "expiry": "2026-09-05",
-                "strike": 110.0,
-                "right": "put",
-                "side": "sell",
-                "contracts": 1,
-                "ratio_qty": 1,
-            },
-            {
-                "expiry": "2026-09-05",
-                "strike": 105.0,
-                "right": "put",
-                "side": "buy",
-                "contracts": 1,
-                "ratio_qty": 1,
-            },
-        ]
-
-    def _valid_tool_input(self) -> dict:
-        return {
-            "underlying": "NVDA",
-            "sleeve": "A",
-            "structure_type": "put_credit_spread",
-            "rationale": "Put skew elevated; ATM put delta ≈ 0.22; dispersion score 3.2.",
-            "max_loss_estimate": 500.0,
-            "limit_price": 1.50,
-            "legs": self._valid_legs(),
-        }
-
     def _mock_chain(self) -> dict:
         snap = SimpleNamespace(
             implied_volatility=0.62,
@@ -215,15 +204,15 @@ class TestStructureAgent:
     def test_well_formed_response_returns_proposed_structure(self):
         from barbell.agent.structure_agent import propose_structure
 
-        resp = _tool_response("record_proposed_structure", self._valid_tool_input())
+        resp = _structure_response()
         screen_r = ScreenResult(
             symbol="NVDA", passed=True, reason="ok",
             metrics={"iv": 0.62, "iv_rank": 0.75, "iv30_hv20_ratio": 1.3},
         )
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = propose_structure(
                 "NVDA",
                 self._mock_chain(),
@@ -241,12 +230,12 @@ class TestStructureAgent:
     def test_legs_have_correct_expiry_and_strikes(self):
         from barbell.agent.structure_agent import propose_structure
 
-        resp = _tool_response("record_proposed_structure", self._valid_tool_input())
+        resp = _structure_response()
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = propose_structure("NVDA", self._mock_chain(), screen_r)
 
         legs = result.legs
@@ -260,26 +249,28 @@ class TestStructureAgent:
     def test_no_tool_block_raises_value_error(self):
         from barbell.agent.structure_agent import propose_structure
 
-        text_block = SimpleNamespace(type="text", text="Here is my analysis...")
-        resp = SimpleNamespace(content=[text_block])
+        resp = _bad_response("Here is my analysis...")
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
-            with pytest.raises(ValueError, match="record_proposed_structure"):
+             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
+            with pytest.raises(ValueError, match="schema-conformant"):
                 propose_structure("NVDA", self._mock_chain(), screen_r)
 
     def test_empty_legs_raises_value_error(self):
         from barbell.agent.structure_agent import propose_structure
 
-        bad_input = {**self._valid_tool_input(), "legs": []}
-        resp = _tool_response("record_proposed_structure", bad_input)
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+            # An empty legs list fails the schema's min_length=2 constraint
+            # at construction time — same as Gemini failing to produce a
+            # schema-conformant response.
+            mock_client.return_value.models.generate_content.return_value = _bad_response(
+                "no legs"
+            )
             with pytest.raises((ValueError, Exception)):
                 propose_structure("NVDA", self._mock_chain(), screen_r)
 
@@ -287,12 +278,12 @@ class TestStructureAgent:
         """dispersion_score=None should not cause an error."""
         from barbell.agent.structure_agent import propose_structure
 
-        resp = _tool_response("record_proposed_structure", self._valid_tool_input())
+        resp = _structure_response()
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.anthropic.Anthropic") as mock_ant:
-            mock_ant.return_value.messages.create.return_value = resp
+             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
             result = propose_structure("NVDA", self._mock_chain(), screen_r, dispersion_score=None)
 
         assert isinstance(result, ProposedStructure)

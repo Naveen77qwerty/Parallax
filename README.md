@@ -38,10 +38,10 @@ screen/universe.py + metrics.py        (deterministic)
 screen/headline_triage.py              (Featherless AI — optional, non-blocking)
   │  cheap news-volume flag; informational context only, never gates a trade
   ▼
-agent/catalyst_gate.py                 (Claude LLM #1 — veto power)
+agent/catalyst_gate.py                 (Gemini LLM #1 — veto power)
   │  per survivor: catalyst_risk True/False + reasoning
   ▼
-agent/structure_agent.py               (Claude LLM #2 — sizes real risk)
+agent/structure_agent.py               (Gemini LLM #2 — sizes real risk)
   │  per clean survivor: ProposedStructure (JSON, schema-validated)
   ▼
 risk/engine.py  →  risk/gates.py (×13) + risk/kill_switch.py
@@ -90,8 +90,8 @@ Parallax/
 │   │   ├── metrics.py       # IV rank, IV30/HV20, local Black-Scholes fallback
 │   │   └── headline_triage.py # Stage 1.5: Featherless model — non-critical
 │   ├── agent/
-│   │   ├── catalyst_gate.py    # Stage 2: Claude — veto power
-│   │   ├── structure_agent.py  # Stage 3: Claude — proposes spread structure
+│   │   ├── catalyst_gate.py    # Stage 2: Gemini — veto power
+│   │   ├── structure_agent.py  # Stage 3: Gemini — proposes spread structure
 │   │   ├── schemas.py          # Pydantic models every LLM output must satisfy
 │   │   └── prompts/
 │   ├── risk/
@@ -145,7 +145,7 @@ pip install -e ".[dev,dashboard]"
 cp .env.example .env
 # Fill in:
 #   ALPACA_API_KEY / ALPACA_SECRET_KEY   — paper account credentials
-#   ANTHROPIC_API_KEY                    — for catalyst gate + structure agent
+#   GEMINI_API_KEY                        — for catalyst gate + structure agent
 #   FEATHERLESS_API_KEY                  — for headline triage (non-critical)
 ```
 
@@ -188,7 +188,7 @@ streamlit run dashboard/app.py  # optional live view
 | Language | Python 3.11+ |
 | Trading + market data | [`alpaca-py`](https://github.com/alpacahq/alpaca-py) |
 | Interactive / demo path | [`alpaca-mcp-server`](https://github.com/alpacahq/alpaca-mcp-server) (MCP, stdio) |
-| LLM — decision-making | Anthropic Claude (`anthropic` SDK) — catalyst gate + structure proposal |
+| LLM — decision-making | Google Gemini (`google-genai` SDK) — catalyst gate + structure proposal |
 | LLM — bulk triage | Featherless AI (`openai` SDK → `api.featherless.ai/v1`) — non-critical headline pre-digest only |
 | Schema validation | Pydantic v2 |
 | Scheduling | APScheduler |
@@ -210,7 +210,7 @@ pytest tests/test_execution.py    # order submission + basket-atomicity
 pytest --cov=barbell --cov-report=term-missing
 ```
 
-The risk gate suite includes a 200+ case property test asserting `engine.evaluate()` never returns more contracts than proposed, plus a PASS/boundary/VETO case for all 13 gates. The schedule suite checks both sides of every calendar boundary (last carry entry, convexity entry, NFP release, flatten deadline, submission deadline). The execution suite covers `submit_basket()`'s capital-reservation lifecycle, including a mid-basket gate failure halting before the next leg is built. CI never hits live Alpaca or Anthropic — all network calls are mocked; full-suite coverage currently runs ~79% overall, ~95% on `risk/`.
+The risk gate suite includes a 200+ case property test asserting `engine.evaluate()` never returns more contracts than proposed, plus a PASS/boundary/VETO case for all 13 gates. The schedule suite checks both sides of every calendar boundary (last carry entry, convexity entry, NFP release, flatten deadline, submission deadline). The execution suite covers `submit_basket()`'s capital-reservation lifecycle, including a mid-basket gate failure halting before the next leg is built. CI never hits live Alpaca or Gemini — all network calls are mocked; full-suite coverage currently runs ~79% overall, ~95% on `risk/`.
 
 > **Note:** the live-account verification steps (`scripts/verify_day1.py` against a funded paper account, a real `submit_basket()` smoke test, a real screen against `config/universe.yaml`, and a real end-to-end LLM call) still need to be run with real credentials before this is submission-ready — see `docs/architecture.md`'s per-member handoff notes for what's been checked offline versus what still needs a live run.
 
