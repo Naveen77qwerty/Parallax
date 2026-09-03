@@ -527,35 +527,110 @@ class TestGateEarningsBlackout:
 
 
 # ---------------------------------------------------------------------------
-# Gate 08: pre_nfp_flatten (stub)
+# Gate 08: gate_pre_nfp_flatten — now wired (Member 4)
 # ---------------------------------------------------------------------------
 
 class TestGatePreNfpFlatten:
-    def test_always_pass_stub(self):
-        result = gates.gate_pre_nfp_flatten(
-            _make_proposal(),
-            _make_portfolio(),
-            _make_market(),
-            _make_config(),
-        )
+    """gate_pre_nfp_flatten is now wired to current_phase() — tests the real behaviour."""
+
+    def test_carry_active_phase_passes(self):
+        """In CARRY_ACTIVE phase, new entries are allowed."""
+        from unittest.mock import patch
+        from barbell.endgame.schedule import Phase
+
+        with patch("barbell.endgame.schedule.current_phase", return_value=Phase.CARRY_ACTIVE):
+            result = gates.gate_pre_nfp_flatten(
+                _make_proposal(),
+                _make_portfolio(),
+                _make_market(),
+                _make_config(),
+            )
         assert result.outcome == "PASS"
-        assert "Member 4" in result.reason
+        assert "CARRY_ACTIVE" in result.reason
+
+    def test_flat_phase_vetos(self):
+        """In FLAT phase, new entries are blocked."""
+        from unittest.mock import patch
+        from barbell.endgame.schedule import Phase
+
+        with patch("barbell.endgame.schedule.current_phase", return_value=Phase.FLAT):
+            result = gates.gate_pre_nfp_flatten(
+                _make_proposal(),
+                _make_portfolio(),
+                _make_market(),
+                _make_config(),
+            )
+        assert result.outcome == "VETO"
+        assert "FLAT" in result.reason
+
+    def test_hold_through_nfp_vetos(self):
+        from unittest.mock import patch
+        from barbell.endgame.schedule import Phase
+
+        with patch("barbell.endgame.schedule.current_phase", return_value=Phase.HOLD_THROUGH_NFP):
+            result = gates.gate_pre_nfp_flatten(
+                _make_proposal(), _make_portfolio(), _make_market(), _make_config()
+            )
+        assert result.outcome == "VETO"
+
+    def test_phase_import_error_passes_conservatively(self):
+        """If current_phase() fails, the gate fails open (PASS) — scheduler-level
+        phase gating is the primary enforcement."""
+        from unittest.mock import patch
+
+        with patch(
+            "barbell.endgame.schedule.current_phase",
+            side_effect=RuntimeError("schedule unavailable"),
+        ):
+            result = gates.gate_pre_nfp_flatten(
+                _make_proposal(), _make_portfolio(), _make_market(), _make_config()
+            )
+        assert result.outcome == "PASS"
 
 
 # ---------------------------------------------------------------------------
-# Gate 09: expiry_past_deadline (stub)
+# Gate 09: gate_expiry_past_deadline — now wired (Member 4)
 # ---------------------------------------------------------------------------
 
 class TestGateExpiryPastDeadline:
-    def test_always_pass_stub(self):
-        result = gates.gate_expiry_past_deadline(
-            _make_proposal(),
-            _make_portfolio(),
-            _make_market(),
-            _make_config(),
+    """gate_expiry_past_deadline reads submission_deadline_et from settings."""
+
+    def _make_proposal_with_expiry(self, expiry: date):
+        from barbell.agent.schemas import ProposedLeg
+        legs = [
+            ProposedLeg(expiry=expiry, strike=110.0, right="put", side="sell", contracts=1),
+            ProposedLeg(expiry=expiry, strike=105.0, right="put", side="buy", contracts=1),
+        ]
+        from barbell.agent.schemas import ProposedStructure
+        return ProposedStructure(
+            underlying="NVDA", legs=legs, rationale="test", sleeve="A", max_loss_estimate=500.0
         )
+
+    def test_expiry_before_deadline_passes(self):
+        mock_settings = MagicMock()
+        mock_settings.calendar.submission_deadline_et = datetime(2026, 9, 4, 11, 0)
+        with patch("barbell.risk.gates.get_settings", return_value=mock_settings):
+            result = gates.gate_expiry_past_deadline(
+                self._make_proposal_with_expiry(date(2026, 9, 3)),
+                _make_portfolio(),
+                _make_market(),
+                _make_config(),
+            )
         assert result.outcome == "PASS"
-        assert "Member 4" in result.reason
+
+    def test_expiry_after_deadline_vetos(self):
+        mock_settings = MagicMock()
+        mock_settings.calendar.submission_deadline_et = datetime(2026, 9, 4, 11, 0)
+        with patch("barbell.risk.gates.get_settings", return_value=mock_settings):
+            result = gates.gate_expiry_past_deadline(
+                self._make_proposal_with_expiry(date(2026, 9, 12)),
+                _make_portfolio(),
+                _make_market(),
+                _make_config(),
+            )
+        assert result.outcome == "VETO"
+        assert "deadline" in result.reason.lower()
+
 
 
 # ---------------------------------------------------------------------------

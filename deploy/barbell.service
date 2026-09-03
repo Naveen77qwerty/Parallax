@@ -1,0 +1,45 @@
+[Unit]
+Description=Dispersion Barbell — autonomous options agent (APScheduler loop)
+Documentation=https://github.com/Naveen77qwerty/Parallax
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# -----------------------------------------------------------------------
+# Identity — run as a non-root user with the repo checked out in their home
+# -----------------------------------------------------------------------
+User=barbell
+Group=barbell
+WorkingDirectory=/home/barbell/Parallax
+
+# -----------------------------------------------------------------------
+# Environment — load secrets from a separate env file (never in this unit)
+# -----------------------------------------------------------------------
+EnvironmentFile=/home/barbell/.barbell.env
+
+# -----------------------------------------------------------------------
+# Process — use the installed barbell entrypoint inside the venv
+# -----------------------------------------------------------------------
+ExecStart=/home/barbell/Parallax/.venv/bin/python -m barbell.scheduler.loop_main
+
+# If the process exits non-zero, wait 30 s and restart.
+# This ensures a crash during a stuck cycle doesn't immediately retry.
+Restart=on-failure
+RestartSec=30
+
+# -----------------------------------------------------------------------
+# Logging — journal captures stdout/stderr; view with:
+#   journalctl -u barbell -f
+# -----------------------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=barbell
+
+# -----------------------------------------------------------------------
+# Resource limits — keep it well within a $5/mo VPS envelope
+# -----------------------------------------------------------------------
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

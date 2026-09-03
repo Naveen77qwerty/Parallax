@@ -376,14 +376,16 @@ class TestDivergedReconcileBlocks:
         from barbell.risk.kill_switch import reset_in_process_cache as ric
         ric()
         config = risk_config
-        decision = evaluate(
-            proposed=proposals[0],
-            portfolio_state=portfolio_state_fn(),
-            market_state=market_state_fn(),
-            config=config,
-            cycle_id="post-recon-cycle",
-            store=store,
-        )
+        from barbell.endgame.schedule import Phase
+        with patch("barbell.endgame.schedule.current_phase", return_value=Phase.CARRY_ACTIVE):
+            decision = evaluate(
+                proposed=proposals[0],
+                portfolio_state=portfolio_state_fn(),
+                market_state=market_state_fn(),
+                config=config,
+                cycle_id="post-recon-cycle",
+                store=store,
+            )
         assert decision.outcome == "VETO"
         # Confirm the veto reason mentions reconciliation
         assert any("reconcil" in r.lower() for r in decision.reasons)
@@ -487,17 +489,19 @@ class TestSubmitBasketThreeLegs:
         def market_state_fn():
             return MarketState(dispersion_score=1.5, reconciliation_diverged=False)
 
-        submit_basket(
-            proposals=proposals,
-            client=client,
-            store=store,
-            exec_config=exec_config,
-            risk_config=risk_config,
-            engine_config=risk_config,
-            portfolio_state_fn=portfolio_state_fn,
-            market_state_fn=market_state_fn,
-            cycle_id="basket-order-test",
-        )
+        from barbell.endgame.schedule import Phase
+        with patch("barbell.endgame.schedule.current_phase", return_value=Phase.CARRY_ACTIVE):
+            submit_basket(
+                proposals=proposals,
+                client=client,
+                store=store,
+                exec_config=exec_config,
+                risk_config=risk_config,
+                engine_config=risk_config,
+                portfolio_state_fn=portfolio_state_fn,
+                market_state_fn=market_state_fn,
+                cycle_id="basket-order-test",
+            )
 
         assert submission_order == ["AAPL", "TSLA", "MSFT"]
 
