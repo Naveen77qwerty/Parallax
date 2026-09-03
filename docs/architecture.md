@@ -460,3 +460,75 @@ for result in survivors:
 - **Real bar data**: replace synthetic HV/IV-rank fallbacks when a higher data plan is available.
 - **News API**: `digest_headlines` is called with an empty list in the skeleton — wire a real news source.
 - **Dispersion score time-series**: currently INFO-logged. Add a queryable column to `ScreenResultRow` or a separate table if the write-up requires a week-long trend chart.
+
+---
+
+## Member 4 handoff
+
+Orchestration, endgame state machine, CLI, dashboard, write-up export, tests, runbook, and deployment artifacts are complete.
+
+### 1. Files delivered
+
+| File | Status |
+|---|---|
+| `src/barbell/endgame/schedule.py` | Complete — `Phase` enum + `current_phase()` + `allowed_actions()` |
+| `src/barbell/scheduler/loop.py` | Complete — `run_one_cycle()` + `run_loop()` (APScheduler) |
+| `src/barbell/cli.py` | Complete — all 5 subcommands dispatched |
+| `src/barbell/journal/export.py` | Extended — all 13 gates, dispersion trend, basket-atomicity defense, AI examples |
+| `dashboard/app.py` | Complete — Streamlit, read-only, auto-refresh |
+| `tests/test_schedule.py` | Complete — both sides of every calendar boundary |
+| `tests/test_scheduler.py` | Complete — happy-path, partial failure, phase gating, reconcile-always-runs |
+| `scripts/export_slide_stats.py` | New — JSON + text block for slides |
+| `docs/runbook.md` | New — daily checklist, normal vs. concerning patterns, flatten procedure |
+| `deploy/barbell.service` | New — systemd unit for Linux VPS deployment |
+
+### 2. Phase enum and boundary semantics
+
+```python
+class Phase(Enum):
+    BUILD            = "BUILD"            # before first_full_session (Sep 1)
+    CARRY_ACTIVE     = "CARRY_ACTIVE"     # Sep 1–2 (last_carry_entry_day EOD)
+    UNWIND           = "UNWIND"           # Sep 3 before 14:30 ET
+    CONVEXITY_ENTRY  = "CONVEXITY_ENTRY"  # Sep 3 at/after 14:30 ET (subsumed by HOLD)
+    HOLD_THROUGH_NFP = "HOLD_THROUGH_NFP" # Sep 3 14:30 ET → Sep 4 08:30 ET
+    MONETIZE         = "MONETIZE"         # Sep 4 08:30–10:45 ET
+    FLAT             = "FLAT"             # Sep 4 10:45–11:00 ET
+    POST_DEADLINE    = "POST_DEADLINE"    # after Sep 4 11:00 ET
+```
+
+`current_phase(now=None)` accepts an optional `now` datetime so tests can pass
+explicit values without freezegun (though freezegun also works).
+
+### 3. Two TODO-stubbed risk gates — now wired
+
+Both gates in `risk/gates.py` that were marked `# TODO(Member 4)` are now wired:
+
+| Gate | Implementation |
+|---|---|
+| `gate_pre_nfp_flatten` | Calls `current_phase()`, VETOs for `HOLD_THROUGH_NFP / MONETIZE / FLAT / POST_DEADLINE` |
+| `gate_expiry_past_deadline` | Reads `get_settings().calendar.submission_deadline_et` directly, VETOs if any leg expiry > deadline date |
+
+Both gates fail open (PASS with a warning) if their dependencies are unavailable —
+the scheduler-level phase check remains the primary enforcement.
+
+### 4. Scheduler loop design notes
+
+`run_one_cycle()` in `scheduler/loop.py`:
+- Each stage (screen, headline_triage, catalyst_gate, structure_agent, evaluate, submit_basket) is wrapped in its own `try/except`
+- `reconcile()` is called at the end of the cycle in a pattern equivalent to `finally` — it runs regardless of whether earlier stages threw
+- Phase gating: `load_candidates()` is only called when `"sleeve_a_open"` or `"sleeve_b_open"` is in `allowed_actions(phase)`
+- `submit_basket()` is called with fresh `portfolio_state_fn` and `market_state_fn` callables, not snapshot values
+
+### 5. Deployment — Windows vs. Linux
+
+This machine is Windows. Options:
+- **Windows Task Scheduler** or **PowerShell background job**: see `docs/runbook.md` Runtime section
+- **Linux VPS**: `deploy/barbell.service` systemd unit, load `.barbell.env` secrets file
+
+State (SQLite journal, kill-switch latch) persists across restarts either way.
+
+### 6. Known remaining TODOs (post-submission)
+
+- **News API**: `digest_headlines()` is called with an empty `headlines=[]` list in the scheduler loop. Wire a real news API (e.g. Alpaca News, Polygon.io) for richer catalyst-gate context.
+- **Real bar data**: `screen/metrics.py` uses synthetic HV/IV-rank fallbacks. A higher Alpaca data plan would enable real 52-week IV history and 20-day close prices.
+- **Dashboard public URL**: instructions in `docs/runbook.md`; not deployed automatically.
