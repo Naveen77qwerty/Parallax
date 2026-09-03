@@ -149,10 +149,11 @@ def _dispersion_trend(screens: list[ScreenResultRow]) -> list[tuple[str, float]]
     """Extract dispersion_score readings across cycles (ts, score)."""
     seen_cycles: dict[str, float] = {}
     for s in screens:
-        if not s.metrics:
+        metrics_raw = getattr(s, "metrics_json", None) or getattr(s, "metrics", None)
+        if not metrics_raw:
             continue
         try:
-            metrics = json.loads(s.metrics) if isinstance(s.metrics, str) else s.metrics
+            metrics = json.loads(metrics_raw) if isinstance(metrics_raw, str) else metrics_raw
         except Exception:
             continue
         score = metrics.get("dispersion_score")
@@ -222,6 +223,21 @@ def export_writeup(db_path: str | Path) -> str:
 
     generated_at = datetime.now(UTC).isoformat()
 
+    latest_dispersion_metric = None
+    for row in list(screens):
+        metrics_raw = getattr(row, "metrics_json", None) or getattr(row, "metrics", None)
+        if not metrics_raw:
+            continue
+        try:
+            m = json.loads(metrics_raw) if isinstance(metrics_raw, str) else metrics_raw
+            score = m.get("dispersion_score")
+            if score is not None:
+                latest_dispersion_metric = float(score)
+                break
+        except Exception:
+            continue
+
+
     try:
         from barbell.config import get_settings
         starting_nav = get_settings().account.starting_nav
@@ -230,6 +246,7 @@ def export_writeup(db_path: str | Path) -> str:
 
     pnl = (latest_nav - starting_nav) if latest_nav else None
     pnl_pct = (pnl / starting_nav * 100) if pnl is not None else None
+
 
     lines: list[str] = [
         "# Dispersion Barbell — Trade Write-Up",
@@ -269,6 +286,10 @@ def export_writeup(db_path: str | Path) -> str:
         f"| Filled orders | {len(filled_orders)} |",
         f"| Total orders | {len(orders)} |",
         f"| Kill switch | {'🔴 TRIGGERED' if kill_triggered else '🟢 Never triggered'} |",
+        "",
+        f"**Filled orders:** {len(filled_orders)}  ",
+        f"**Capital reservations recorded:** {len(reservations)}  ",
+        f"**Basket leg fill events:** {len(leg_fills)}  ",
         "",
         "---",
         "",
