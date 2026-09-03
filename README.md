@@ -27,11 +27,13 @@ The pipeline is fully autonomous: screen → catalyst gate → structure proposa
 scheduler/loop.py  (every 30 min, market hours only)
   │
   ▼
-endgame/schedule.py       → current phase: BUILD | CARRY_ACTIVE | UNWIND | FLAT
-  │
+endgame/schedule.py       → current phase: BUILD | CARRY_ACTIVE | UNWIND |
+  │                          CONVEXITY_ENTRY | HOLD_THROUGH_NFP | MONETIZE |
+  │                          FLAT | POST_DEADLINE
   ▼
 screen/universe.py + metrics.py        (deterministic)
-  │  ~25 seed names → 8–14 survivors (IV rank, IV30/HV20, liquidity)
+  │  ~25 seed names → survivors (IV rank, IV30/HV20, liquidity)
+  │  + dispersion_score() — vega-weighted single-name IV vs index IV
   ▼
 screen/headline_triage.py              (Featherless AI — optional, non-blocking)
   │  cheap news-volume flag; informational context only, never gates a trade
@@ -42,11 +44,13 @@ agent/catalyst_gate.py                 (Claude LLM #1 — veto power)
 agent/structure_agent.py               (Claude LLM #2 — sizes real risk)
   │  per clean survivor: ProposedStructure (JSON, schema-validated)
   ▼
-risk/engine.py  →  risk/gates.py (×12) + risk/kill_switch.py
+risk/engine.py  →  risk/gates.py (×13) + risk/kill_switch.py
   │  PASS | RESIZE(smaller) | REJECT — never larger than proposed
   ▼
 execution/orders.py  →  broker/alpaca_client.py
   │  limit orders only, multi-leg, bounded retry
+  │  submit_basket() — sequential per-underlying entry with capital
+  │  reserved in the journal before leg 1, re-evaluated after every fill
   ▼
 execution/reconcile.py
   │  broker state is truth; diverge → halt new entries
@@ -58,9 +62,11 @@ journal/store.py           (append-only — every decision logged)
 
 - **Risk engine can only tighten.** No gate may increase a proposed size or clear a veto. Enforced by a property test in `tests/test_risk_gates.py`.
 - **Limit orders only.** `order_type="limit"` is enforced in `execution/orders.py` in code, not just config.
-- **No naked shorts.** Every sell leg must be paired with a buy leg of the same expiry in the same multi-leg order, verified by `broker/alpaca_client.py` before any network call.
+- **No naked shorts.** Every sell leg must be paired with a buy leg of the same expiry in the same multi-leg order, checked in both `broker/alpaca_client.py` (before any network call) and `risk/gates.py` (defense in depth).
 - **`broker/alpaca_client.py` is the only module that imports `alpaca-py`.** All other modules call through its interface for full mockability.
-- **Kill switch.** An -8% NAV drawdown latches `risk/kill_switch.py` (persisted in the journal DB); it survives process restarts.
+- **Kill switch.** An NAV drawdown latches `risk/kill_switch.py` (persisted in the journal DB); it survives process restarts.
+- **Basket capital reservation.** A multi-underlying Sleeve A basket reserves its full max-loss in the journal *before* the first leg is submitted, enters one underlying at a time, and re-runs the risk engine against each actual fill before building the next leg — the fix for the fact that Alpaca only guarantees atomic fills within one underlying's multi-leg order, never across underlyings.
+- **Dispersion gate.** `gate_dispersion_score` vetoes new Sleeve A entries when vega-weighted single-name IV falls below index IV by too little to justify the trade; it passes (not vetoes) while `dispersion_score` hasn't been computed yet for the cycle, so absence of data never silently blocks the sleeve.
 
 ---
 
@@ -89,30 +95,36 @@ Parallax/
 │   │   ├── schemas.py          # Pydantic models every LLM output must satisfy
 │   │   └── prompts/
 │   ├── risk/
-│   │   ├── gates.py         # 12 gates, pure functions, highest test coverage
+│   │   ├── gates.py         # 13 gates, pure functions, highest test coverage
 │   │   ├── engine.py        # orchestrates gates — can only tighten, never loosen
-│   │   └── kill_switch.py   # -8% NAV latch, persisted in journal DB
+│   │   └── kill_switch.py   # NAV drawdown latch, persisted in journal DB
 │   ├── execution/
-│   │   ├── orders.py        # builds + submits; limit-only enforced in code
-│   │   └── reconcile.py     # broker-is-truth diff, every cycle
+│   │   ├── orders.py        # submit() + submit_basket(); limit-only, capital-reserved sequential entry
+│   │   └── reconcile.py     # broker-is-truth diff, every cycle and after every basket leg fill
 │   ├── endgame/
-│   │   └── schedule.py      # dated state machine: BUILD→CARRY_ACTIVE→UNWIND→FLAT
+│   │   └── schedule.py      # dated state machine: BUILD→CARRY_ACTIVE→UNWIND→CONVEXITY_ENTRY→HOLD_THROUGH_NFP→MONETIZE→FLAT→POST_DEADLINE
 │   ├── journal/
-│   │   ├── store.py         # append-only SQLite: every decision + reason
+│   │   ├── store.py         # append-only SQLite: every decision + reason (9 tables, incl. capital_reservations / basket_leg_fills)
 │   │   └── export.py        # renders docs/writeup_generated.md from the DB
 │   └── scheduler/
 │       └── loop.py          # APScheduler cycle runner — unattended process
 ├── scripts/
 │   ├── verify_day1.py       # 7-item checklist against paper API
-│   └── seed_paper_account.py
+│   ├── seed_paper_account.py
+│   └── export_slide_stats.py # NAV, P&L, gate stats, dispersion reading → JSON for slides
 ├── dashboard/
 │   └── app.py               # Streamlit read-only live view
+├── deploy/
+│   └── barbell.service       # systemd unit for the unattended scheduler loop
 ├── tests/
 │   ├── test_risk_gates.py   # boundary + property tests on the safety layer
-│   ├── test_schedule.py     # freezegun tests at every calendar boundary
+│   ├── test_schedule.py     # calendar-boundary tests, both sides of every phase transition
+│   ├── test_execution.py    # order submission + basket-atomicity tests
+│   ├── test_scheduler.py    # full-cycle orchestration tests
 │   └── test_screen.py
 └── docs/
-    ├── architecture.md      # full engineering blueprint
+    ├── architecture.md      # full engineering blueprint + per-member handoff notes
+    ├── runbook.md            # day-to-day operating guide
     └── writeup_generated.md # auto-generated by journal/export.py
 ```
 
@@ -191,27 +203,37 @@ streamlit run dashboard/app.py  # optional live view
 ## Testing
 
 ```bash
-pytest                        # full suite
+pytest                        # full suite — 180+ tests
 pytest tests/test_risk_gates.py   # risk engine only
-pytest tests/test_schedule.py     # endgame schedule boundaries (freezegun)
+pytest tests/test_schedule.py     # endgame schedule boundaries
+pytest tests/test_execution.py    # order submission + basket-atomicity
 pytest --cov=barbell --cov-report=term-missing
 ```
 
-The risk gate suite includes a property test asserting `engine.evaluate()` never returns more contracts than proposed. The schedule suite freezes time at every critical calendar boundary (last carry entry, convexity entry gate, NFP, flatten deadline, submission deadline). CI never hits live Alpaca or Anthropic — all network calls are mocked.
+The risk gate suite includes a 200+ case property test asserting `engine.evaluate()` never returns more contracts than proposed, plus a PASS/boundary/VETO case for all 13 gates. The schedule suite checks both sides of every calendar boundary (last carry entry, convexity entry, NFP release, flatten deadline, submission deadline). The execution suite covers `submit_basket()`'s capital-reservation lifecycle, including a mid-basket gate failure halting before the next leg is built. CI never hits live Alpaca or Anthropic — all network calls are mocked; full-suite coverage currently runs ~79% overall, ~95% on `risk/`.
+
+> **Note:** the live-account verification steps (`scripts/verify_day1.py` against a funded paper account, a real `submit_basket()` smoke test, a real screen against `config/universe.yaml`, and a real end-to-end LLM call) still need to be run with real credentials before this is submission-ready — see `docs/architecture.md`'s per-member handoff notes for what's been checked offline versus what still needs a live run.
 
 ---
 
 ## Endgame Schedule
 
-| Phase | Trigger | Allowed actions |
-|---|---|---|
-| `BUILD` | Start | Broker verification, data checks |
-| `CARRY_ACTIVE` | Market open Tue | Sleeve A entries, 30-min cycles |
-| `UNWIND` | Thu session | Close all Sleeve A; enter Sleeve B |
-| `HOLD_THROUGH_NFP` | Thu close | No new entries |
-| `FLAT` | Fri 10:45 ET | All positions must be closed; submission |
+Dates below are from `config/settings.yaml`'s `calendar` section for the current judged window; `endgame/schedule.py` computes the phase from these on every cycle.
 
-The `gate_pre_nfp_flatten` and `gate_expiry_past_deadline` risk gates enforce phase boundaries at the execution layer — a trade that would survive all other gates is still vetoed if the schedule says positions must be flat.
+| Phase | Trigger (ET) | Allowed actions |
+|---|---|---|
+| `BUILD` | before Aug 31 | Reads only — broker verification, data checks |
+| `CARRY_ACTIVE` | Aug 31 – Sep 2 EOD | Sleeve A entries + closes, 30-min cycles |
+| `UNWIND` | Sep 3, before 14:30 | Sleeve A closes only (routed through `submit_basket`) |
+| `CONVEXITY_ENTRY` | Sep 3, at/after 14:30 | Sleeve B open (size scales with NAV vs. starting NAV) |
+| `HOLD_THROUGH_NFP` | overnight through Sep 4 08:30 | No new entries, no closes |
+| `MONETIZE` | Sep 4, 08:30 – 10:45 | Sleeve B closes only |
+| `FLAT` | Sep 4, 10:45 – 11:00 | Reads only — everything must already be flat |
+| `POST_DEADLINE` | Sep 4, at/after 11:00 | Reads only |
+
+The `gate_pre_nfp_flatten` and `gate_expiry_past_deadline` risk gates enforce these phase boundaries at the execution layer too — a trade that would survive every other gate is still vetoed if the schedule says positions must be flat.
+
+> **Known gap:** `current_phase()` currently folds `CONVEXITY_ENTRY` into `HOLD_THROUGH_NFP` at the trigger boundary, so `allowed_actions()` never actually returns `"sleeve_b_open"` in a live cycle — Sleeve B can't open automatically yet. Needs a fix in `endgame/schedule.py` before Sleeve B can trade unattended.
 
 ---
 
