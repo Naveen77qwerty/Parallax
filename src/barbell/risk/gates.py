@@ -488,23 +488,40 @@ def gate_pre_nfp_flatten(
     """
     VETO new entries once we are past the NFP-flatten deadline.
 
-    TODO(Member 4): This gate currently returns PASS unconditionally because
-    endgame/schedule.py (Member 4's deliverable) is not yet implemented.
-    Once Member 4 ships schedule.py with is_past_nfp() / current_phase(),
-    wire this gate to call that function and VETO when the endgame phase
-    is HOLD_THROUGH_NFP, MONETIZE, FLAT, or POST_DEADLINE.
+    Phase is read from endgame/schedule.py's current_phase(). New entries
+    are blocked in HOLD_THROUGH_NFP, MONETIZE, FLAT, and POST_DEADLINE.
 
-    The scheduler loop (Member 4) also enforces this at the cycle level —
-    having the check here in the risk gate is defense in depth.
+    The scheduler loop also enforces phase-gating at the cycle level —
+    this gate provides defense-in-depth at the individual proposal level.
+
+    On any import or config error, fails OPEN (PASS) with a warning rather
+    than silently blocking the whole pipeline — the scheduler-level phase
+    check is the primary enforcement.
     """
     _NAME = "gate_pre_nfp_flatten"
-    # TODO(Member 4): Replace this stub with:
-    #     from barbell.endgame.schedule import current_phase, Phase
-    #     from barbell.broker.clock import BrokerClock
-    #     phase = current_phase(clock)
-    #     if phase in (Phase.HOLD_THROUGH_NFP, Phase.MONETIZE, Phase.FLAT, Phase.POST_DEADLINE):
-    #         return _veto(_NAME, f"NFP flatten required — current phase is {phase.name}.")
-    return _pass(_NAME, "pre-NFP flatten gate not yet wired (endgame/schedule.py pending Member 4).")
+
+    try:
+        from barbell.endgame.schedule import Phase, current_phase
+        phase = current_phase()
+    except Exception as exc:
+        log.warning("%s: could not determine phase — passing conservatively: %s", _NAME, exc)
+        return _pass(_NAME, f"phase unavailable (error: {exc}) — passing conservatively.")
+
+    _BLOCKING_PHASES = {
+        Phase.HOLD_THROUGH_NFP,
+        Phase.MONETIZE,
+        Phase.FLAT,
+        Phase.POST_DEADLINE,
+    }
+
+    if phase in _BLOCKING_PHASES:
+        return _veto(
+            _NAME,
+            f"NFP flatten required — current phase is {phase.name}. "
+            "No new entries allowed after the pre-NFP flatten window.",
+        )
+
+    return _pass(_NAME, f"Phase is {phase.name} — pre-NFP flatten gate allows entries.")
 
 
 # ---------------------------------------------------------------------------
@@ -520,25 +537,39 @@ def gate_expiry_past_deadline(
     """
     VETO if any leg expires after the contest submission deadline.
 
-    TODO(Member 4): This gate currently returns PASS unconditionally because
-    endgame/schedule.py (Member 4's deliverable) holds the submission_deadline
-    state and the is_past_flatten_deadline() logic.  Once Member 4 ships,
-    wire this gate to check each leg.expiry against calendar.submission_deadline_et.
+    Reads submission_deadline_et directly from config/settings.yaml — no
+    dependency on endgame/schedule.py (per Member 2's handoff note).
 
-    Note: The deadline is already in config/settings.yaml as
-    calendar.submission_deadline_et — this gate can also read it directly
-    from get_settings() without needing schedule.py, which is the preferred
-    fix once Member 4 confirms that approach.
+    Rationale: options that expire after the judged window cannot contribute
+    to realised P&L before submission and represent uncontrolled open risk
+    past the contest boundary.
     """
     _NAME = "gate_expiry_past_deadline"
-    # TODO(Member 4): Replace this stub with:
-    #     from barbell.config import get_settings
-    #     deadline = get_settings().calendar.submission_deadline_et
-    #     deadline_date = deadline.date()
-    #     for leg in proposed.legs:
-    #         if leg.expiry > deadline_date:
-    #             return _veto(_NAME, f"Leg expiry {leg.expiry} is after submission deadline {deadline_date}.")
-    return _pass(_NAME, "expiry-past-deadline gate not yet wired (endgame/schedule.py pending Member 4).")
+
+    try:
+        deadline_dt = get_settings().calendar.submission_deadline_et
+        # submission_deadline_et may be naive (from YAML) — treat as ET
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+        if deadline_dt.tzinfo is None:
+            deadline_dt = deadline_dt.replace(tzinfo=_ET)
+        deadline_date = deadline_dt.date()
+    except Exception as exc:
+        log.warning("%s: could not read submission deadline — passing: %s", _NAME, exc)
+        return _pass(_NAME, f"deadline unavailable (error: {exc}) — passing conservatively.")
+
+    for leg in proposed.legs:
+        if leg.expiry > deadline_date:
+            return _veto(
+                _NAME,
+                f"Leg expiry {leg.expiry} is after submission deadline {deadline_date}. "
+                "Position cannot be realised before judging — rejecting.",
+            )
+
+    return _pass(
+        _NAME,
+        f"All leg expiries on or before submission deadline {deadline_date}.",
+    )
 
 
 # ---------------------------------------------------------------------------
