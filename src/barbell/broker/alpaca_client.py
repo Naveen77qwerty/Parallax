@@ -331,22 +331,42 @@ class AlpacaClient:
     def _check_no_naked_shorts(self, legs: list[ProposedLeg]) -> None:
         """
         Raise NakedShortError if any sell leg is not covered by a buy leg
-        with the same underlying expiry.
+        of the same right, same expiry, with a strike on the protective side.
 
-        Coverage rule: for each SELL leg, there must exist at least one BUY
-        leg with the same expiration date (same underlying is assumed since
-        mleg orders are per-underlying).  This catches uncovered calls/puts.
+        Coverage rule: for each SELL leg, there must exist a BUY leg with the
+        same expiration date AND the same right (call/put) — matching by
+        expiry alone previously let a SELL put "pass" as covered by an
+        unrelated BUY call at the same expiry, which is not a defined-risk
+        structure at all. The covering BUY leg's strike must also be on the
+        protective side: lower than the sell strike for puts (caps downside
+        loss), higher than the sell strike for calls (caps upside loss) —
+        this is what actually bounds the spread's max loss, not just the
+        presence of some same-right long leg.
 
         This is intentionally conservative — it errs toward rejection.
         """
-        buy_expiries: set[date] = {leg.expiry for leg in legs if leg.side == "buy"}
-        sell_expiries: list[date] = [leg.expiry for leg in legs if leg.side == "sell"]
+        buy_legs = [leg for leg in legs if leg.side == "buy"]
+        sell_legs = [leg for leg in legs if leg.side == "sell"]
 
-        uncovered = [exp for exp in sell_expiries if exp not in buy_expiries]
+        uncovered = []
+        for sell in sell_legs:
+            covered = any(
+                buy.expiry == sell.expiry
+                and buy.right == sell.right
+                and (
+                    (sell.right == "put" and buy.strike < sell.strike)
+                    or (sell.right == "call" and buy.strike > sell.strike)
+                )
+                for buy in buy_legs
+            )
+            if not covered:
+                uncovered.append(sell)
+
         if uncovered:
+            details = [f"{leg.right} strike={leg.strike} expiry={leg.expiry}" for leg in uncovered]
             raise NakedShortError(
-                f"Naked short detected: SELL leg(s) with expiry {uncovered} have no "
-                f"corresponding BUY leg in the same order.  "
+                f"Naked short detected: SELL leg(s) {details} have no corresponding "
+                f"BUY leg of the same right/expiry on the protective side of the strike.  "
                 f"All short legs must be covered within the same multi-leg order "
                 f"(CLAUDE.md non-negotiable)."
             )

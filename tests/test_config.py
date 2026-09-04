@@ -88,3 +88,18 @@ def test_missing_required_env_var_raises(monkeypatch, missing_var):
 
     with pytest.raises(EnvironmentError, match=f"'{missing_var}'"):
         get_settings()
+
+
+@pytest.mark.parametrize("value", ["false", "0", "no", "FALSE", "anything-else"])
+def test_paper_trade_not_true_raises(monkeypatch, value):
+    """CLAUDE.md non-negotiable: this project is paper-trading only. A non-true
+    ALPACA_PAPER_TRADE must hard-fail at settings load, not just be parsed."""
+    monkeypatch.setenv("ALPACA_API_KEY", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.setenv("ALPACA_PAPER_TRADE", value)
+    monkeypatch.setenv("GEMINI_API_KEY", "a")
+    monkeypatch.setenv("BARBELL_DB_PATH", "data/barbell.db")
+    monkeypatch.setenv("BARBELL_LOG_LEVEL", "INFO")
+
+    with pytest.raises(EnvironmentError, match="paper-trading only"):
+        get_settings()

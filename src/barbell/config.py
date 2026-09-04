@@ -236,6 +236,15 @@ def get_settings() -> Settings:
 
     paper_str = os.environ["ALPACA_PAPER_TRADE"].lower()
     alpaca_paper = paper_str in ("true", "1", "yes")
+    if not alpaca_paper:
+        # CLAUDE.md non-negotiable: "ALPACA_PAPER_TRADE must stay true everywhere
+        # it appears." Parsing the value was previously the only check — nothing
+        # stopped a live-trading account from actually being used. No override
+        # flag: this project never submits to a live account, full stop.
+        raise EnvironmentError(
+            f"ALPACA_PAPER_TRADE={os.environ['ALPACA_PAPER_TRADE']!r} — this project "
+            "is paper-trading only (CLAUDE.md non-negotiable). Set ALPACA_PAPER_TRADE=true."
+        )
 
     universe_data = {
         "candidates": raw_universe.get("candidates", {}),

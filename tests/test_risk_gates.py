@@ -303,6 +303,45 @@ class TestGateDefinedRiskOnly:
         )
         assert result.outcome == "VETO"
 
+    def test_veto_mismatched_right_uncovered_sell(self):
+        """A SELL put + an unrelated BUY call at the same expiry is not a
+        defined-risk structure — matching by expiry alone would have passed this."""
+        exp = date(2026, 9, 4)
+        proposal = ProposedStructure(
+            underlying="AAPL",
+            legs=[
+                ProposedLeg(symbol="AAPL260904P00200000", expiry=exp, strike=200.0, right="put", side="sell", contracts=1),
+                ProposedLeg(symbol="AAPL260904C00210000", expiry=exp, strike=210.0, right="call", side="buy", contracts=1),
+            ],
+            rationale="test",
+            sleeve="A",
+            max_loss_estimate=500.0,
+        )
+        result = gates.gate_defined_risk_only(
+            proposal, _make_portfolio(), _make_market(), _make_config()
+        )
+        assert result.outcome == "VETO"
+        assert "Naked short" in result.reason
+
+    def test_veto_wrong_side_strike_uncovered_sell(self):
+        """A SELL put covered by a BUY put on the wrong side of the strike
+        (higher, not lower) does not bound the spread's max loss."""
+        exp = date(2026, 9, 4)
+        proposal = ProposedStructure(
+            underlying="AAPL",
+            legs=[
+                ProposedLeg(symbol="AAPL260904P00200000", expiry=exp, strike=200.0, right="put", side="sell", contracts=1),
+                ProposedLeg(symbol="AAPL260904P00205000", expiry=exp, strike=205.0, right="put", side="buy", contracts=1),
+            ],
+            rationale="test",
+            sleeve="A",
+            max_loss_estimate=500.0,
+        )
+        result = gates.gate_defined_risk_only(
+            proposal, _make_portfolio(), _make_market(), _make_config()
+        )
+        assert result.outcome == "VETO"
+
 
 # ---------------------------------------------------------------------------
 # Gate 04: quote_staleness

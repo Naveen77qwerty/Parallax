@@ -182,6 +182,64 @@ def test_submit_mleg_order_uncovered_expiry_raises(broker_client):
     assert not broker_client._trading.submit_order.called
 
 
+def test_submit_mleg_order_mismatched_right_raises(broker_client):
+    """A SELL put + an unrelated BUY call at the same expiry is not a
+    defined-risk structure — matching by expiry alone would have let this
+    through as 'covered'."""
+    legs = [
+        ProposedLeg(
+            symbol="AAPL260904P00200000",
+            expiry=date(2026, 9, 4),
+            strike=200.0,
+            right="put",
+            side="sell",
+            contracts=1,
+        ),
+        ProposedLeg(
+            symbol="AAPL260904C00210000",
+            expiry=date(2026, 9, 4),  # same expiry, but a CALL — does not cover the put
+            strike=210.0,
+            right="call",
+            side="buy",
+            contracts=1,
+        ),
+    ]
+
+    with pytest.raises(NakedShortError, match="Naked short detected"):
+        broker_client.submit_mleg_order(legs, limit_price=0.80)
+
+    assert not broker_client._trading.submit_order.called
+
+
+def test_submit_mleg_order_wrong_side_strike_raises(broker_client):
+    """A SELL put covered by a BUY put on the WRONG side of the strike (higher,
+    not lower) does not actually bound the spread's max loss and must still
+    be rejected, even though right and expiry both match."""
+    legs = [
+        ProposedLeg(
+            symbol="AAPL260904P00200000",
+            expiry=date(2026, 9, 4),
+            strike=200.0,
+            right="put",
+            side="sell",
+            contracts=1,
+        ),
+        ProposedLeg(
+            symbol="AAPL260904P00205000",
+            expiry=date(2026, 9, 4),
+            strike=205.0,  # higher than the sell strike — wrong side for a put spread
+            right="put",
+            side="buy",
+            contracts=1,
+        ),
+    ]
+
+    with pytest.raises(NakedShortError, match="Naked short detected"):
+        broker_client.submit_mleg_order(legs, limit_price=0.80)
+
+    assert not broker_client._trading.submit_order.called
+
+
 def test_submit_mleg_order_validation_errors(broker_client):
     """Test validation on empty legs or 0.0 limit price."""
     with pytest.raises(ValueError, match="at least one leg"):

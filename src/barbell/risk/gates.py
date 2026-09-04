@@ -223,28 +223,43 @@ def gate_defined_risk_only(
     config: RiskGateConfig,
 ) -> GateResult:
     """
-    VETO if any SELL leg is not covered by a BUY leg with the same expiry
-    in the same proposed structure.
+    VETO if any SELL leg is not covered by a BUY leg of the same right, same
+    expiry, with a strike on the protective side (lower for puts, higher for
+    calls — what actually bounds the spread's max loss).
 
     DEFENSE IN DEPTH: broker/alpaca_client.py's submit_mleg_order() runs
     the identical check before the Alpaca SDK call.  BOTH checks are
     intentional and must remain — this gate catches naked shorts before any
     order is built; the broker layer catches them again at submission time.
     Do NOT remove either copy.
+
+    Matching by expiry alone previously let a SELL put "pass" as covered by
+    an unrelated BUY call at the same expiry, which is not a defined-risk
+    structure at all — tightened to match right + verify strike relationship.
     """
     _NAME = "gate_defined_risk_only"
 
-    buy_expiries: set[date] = {leg.expiry for leg in proposed.legs if leg.side == "buy"}
-    uncovered: list[date] = [
-        leg.expiry for leg in proposed.legs
-        if leg.side == "sell" and leg.expiry not in buy_expiries
-    ]
+    buy_legs = [leg for leg in proposed.legs if leg.side == "buy"]
+    uncovered = []
+    for sell in (leg for leg in proposed.legs if leg.side == "sell"):
+        covered = any(
+            buy.expiry == sell.expiry
+            and buy.right == sell.right
+            and (
+                (sell.right == "put" and buy.strike < sell.strike)
+                or (sell.right == "call" and buy.strike > sell.strike)
+            )
+            for buy in buy_legs
+        )
+        if not covered:
+            uncovered.append(sell)
 
     if uncovered:
+        details = [f"{leg.right} strike={leg.strike} expiry={leg.expiry}" for leg in uncovered]
         return _veto(
             _NAME,
-            f"Naked short detected: SELL leg(s) with expiry {sorted(set(uncovered))} "
-            f"have no covering BUY leg in the same structure. "
+            f"Naked short detected: SELL leg(s) {details} have no covering BUY leg "
+            f"of the same right/expiry on the protective side of the strike. "
             f"Defined-risk-only policy (CLAUDE.md non-negotiable).",
         )
 
