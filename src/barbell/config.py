@@ -23,6 +23,8 @@ name if missing, never a generic KeyError):
 Optional (have defaults in .env.example):
     ALPACA_BASE_URL
     GEMINI_MODEL
+    GEMINI_MODELS       # comma-separated fallback list, tried in order on
+                        # quota/rate-limit errors; defaults to [GEMINI_MODEL]
     FEATHERLESS_API_KEY
     FEATHERLESS_BASE_URL
     FEATHERLESS_MODEL
@@ -43,6 +45,15 @@ from pydantic import BaseModel, field_validator, model_validator
 
 # Project root is two levels up from this file: src/barbell/config.py
 _ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _parse_gemini_models(default_model: str) -> list[str]:
+    """GEMINI_MODELS is a comma-separated fallback list, tried in order on
+    quota/rate-limit errors (see agent/gemini_client.py). Unset or empty
+    collapses to the single GEMINI_MODEL — identical to pre-fallback behavior."""
+    raw = os.environ.get("GEMINI_MODELS", "").strip()
+    models = [m.strip() for m in raw.split(",") if m.strip()]
+    return models or [default_model]
 
 
 def _require_env(name: str) -> str:
@@ -183,6 +194,7 @@ class Settings(BaseModel):
 
     gemini_api_key: str
     gemini_model: str
+    gemini_models: list[str] = ["gemini-2.5-flash"]
 
     featherless_api_key: str
     featherless_base_url: str
@@ -268,6 +280,7 @@ def get_settings() -> Settings:
         alpaca_base_url=os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"),
         gemini_api_key=os.environ["GEMINI_API_KEY"],
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_models=_parse_gemini_models(os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")),
         featherless_api_key=os.environ.get("FEATHERLESS_API_KEY", ""),
         featherless_base_url=os.environ.get(
             "FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"

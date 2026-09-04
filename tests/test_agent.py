@@ -28,6 +28,7 @@ def _base_settings():
     return SimpleNamespace(
         gemini_api_key="test-key",
         gemini_model="gemini-2.5-flash",
+        gemini_models=["gemini-2.5-flash"],
         featherless_api_key="fl-test-key",
         featherless_base_url="https://api.featherless.ai/v1",
         featherless_model="Qwen/Qwen2.5-7B-Instruct",
@@ -111,8 +112,8 @@ class TestCatalystGateFull:
             "Q3 earnings already reported; IV resetting lower.",
             sources=["earnings report headline"],
         )
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("NVDA", ["Earnings beat"])
 
@@ -130,8 +131,8 @@ class TestCatalystGateFull:
             "Active FDA PDUFA date in 5 days — binary outcome unpriced.",
             sources=["FDA headline"],
         )
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("BIOC", ["FDA decision imminent"])
 
@@ -142,8 +143,8 @@ class TestCatalystGateFull:
 
         resp = _bad_response("I'm unsure.")
 
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("NVDA", [])
 
@@ -154,8 +155,8 @@ class TestCatalystGateFull:
         from google.genai import errors as genai_errors
         from barbell.agent.catalyst_gate import check_catalyst
 
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.side_effect = genai_errors.APIError(
                 503, {"message": "Service Unavailable"}
             )
@@ -169,8 +170,8 @@ class TestCatalystGateFull:
 
         resp = _catalyst_response(False, "")  # empty reasoning
 
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("NVDA", [])
 
@@ -188,8 +189,8 @@ class TestCatalystGateFull:
             metrics={"iv": 0.55, "iv_rank": 0.72},
         )
 
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = check_catalyst("AMD", ["Headline"], digest=digest, screen_result=screen_r)
 
@@ -222,7 +223,8 @@ class TestStructureAgent:
         )
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+             patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = propose_structure(
                 "NVDA",
@@ -245,7 +247,8 @@ class TestStructureAgent:
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+             patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = propose_structure("NVDA", self._mock_chain(), screen_r)
 
@@ -264,7 +267,8 @@ class TestStructureAgent:
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+             patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             with pytest.raises(ValueError, match="schema-conformant"):
                 propose_structure("NVDA", self._mock_chain(), screen_r)
@@ -275,7 +279,8 @@ class TestStructureAgent:
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+             patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             # An empty legs list fails the schema's min_length=2 constraint
             # at construction time — same as Gemini failing to produce a
             # schema-conformant response.
@@ -293,7 +298,8 @@ class TestStructureAgent:
         screen_r = ScreenResult(symbol="NVDA", passed=True, reason="ok", metrics={})
 
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+             patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = propose_structure("NVDA", self._mock_chain(), screen_r, dispersion_score=None)
 
@@ -360,7 +366,8 @@ class TestStructureAgentSleeveB:
 
         resp = self._sleeve_b_response()
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+             patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             result = propose_structure_sleeve_b(
                 self._mock_spy_chain(), nav_current=100000.0, nav_starting=100000.0,
@@ -380,7 +387,8 @@ class TestStructureAgentSleeveB:
 
         resp = self._sleeve_b_response(sleeve="A")
         with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
-             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+             patch("barbell.agent.gemini_client.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = resp
             with pytest.raises(ValueError, match="expected 'B'"):
                 propose_structure_sleeve_b(

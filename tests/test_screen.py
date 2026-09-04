@@ -537,6 +537,7 @@ class TestCatalystGate:
         return SimpleNamespace(
             gemini_api_key="test-key",
             gemini_model="gemini-2.5-flash",
+            gemini_models=["gemini-2.5-flash"],
             sleeve_a_carry=SimpleNamespace(
                 screen=SimpleNamespace(min_iv_rank=50),
                 dte_range=[3, 7],
@@ -556,8 +557,8 @@ class TestCatalystGate:
         )
         mock_response = SimpleNamespace(parsed=parsed, text=parsed.model_dump_json())
 
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=self._settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=self._settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = mock_response
             result = check_catalyst("NVDA", ["Earnings beat"])
 
@@ -571,8 +572,8 @@ class TestCatalystGate:
         # Gemini failed to produce a schema-conformant response
         mock_response = SimpleNamespace(parsed=None, text="I cannot determine this.")
 
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=self._settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=self._settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.return_value = mock_response
             result = check_catalyst("NVDA", ["Some headline"])
 
@@ -583,8 +584,8 @@ class TestCatalystGate:
         from google.genai import errors as genai_errors
         from barbell.agent.catalyst_gate import check_catalyst
 
-        with patch("barbell.agent.catalyst_gate.get_settings", return_value=self._settings()), \
-             patch("barbell.agent.catalyst_gate.genai.Client") as mock_client:
+        with patch("barbell.agent.gemini_client.get_settings", return_value=self._settings()), \
+             patch("barbell.agent.gemini_client.genai.Client") as mock_client:
             mock_client.return_value.models.generate_content.side_effect = genai_errors.APIError(
                 429, {"message": "rate limit"}
             )

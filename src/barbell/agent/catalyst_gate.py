@@ -21,13 +21,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 
+from barbell.agent.gemini_client import generate_content_with_fallback
 from barbell.agent.schemas import CatalystVerdict, HeadlineDigest, ScreenResult
-from barbell.config import get_settings
 
 log = logging.getLogger(__name__)
 
@@ -172,13 +171,9 @@ def _call_gemini(symbol: str, prompt_text: str) -> CatalystVerdict:
     Raises ValueError if the response doesn't conform to the schema.
     Raises genai_errors.APIError on API-level failures (callers handle these).
     """
-    s = get_settings()
-    client = genai.Client(api_key=s.gemini_api_key)
-
-    response = client.models.generate_content(
-        model=s.gemini_model,
-        contents=prompt_text,
-        config=genai_types.GenerateContentConfig(
+    response = generate_content_with_fallback(
+        prompt_text,
+        genai_types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=_CatalystVerdictSchema,
         ),
