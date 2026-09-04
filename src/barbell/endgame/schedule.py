@@ -153,21 +153,16 @@ def current_phase(now: datetime | None = None) -> Phase:
     if now >= nfp_release:
         return Phase.MONETIZE
 
-    # 5. HOLD_THROUGH_NFP — after convexity_entry_after_et on
-    #    convexity_entry_day, until nfp_release_et (which is on submission day)
-    #    This phase spans the overnight gap between Sep 3 afternoon and Sep 4
-    #    morning NFP release.
-    if now >= convexity_threshold and today >= cfg.convexity_entry_day:
+    # 5. HOLD_THROUGH_NFP — strictly AFTER convexity_entry_day (the overnight
+    #    gap between Sep 3 evening and Sep 4 morning NFP release). Must not
+    #    also match convexity_entry_day itself, or CONVEXITY_ENTRY (below)
+    #    becomes unreachable and Sleeve B can never open.
+    if today > cfg.convexity_entry_day:
         return Phase.HOLD_THROUGH_NFP
 
     # 4. CONVEXITY_ENTRY — convexity_entry_day, at or after convexity_entry_after_et
-    #    (already handled above as HOLD_THROUGH_NFP for "after" — this branch
-    #    is therefore redundant but kept for clarity; the logic above subsumes it)
-    # Note: CONVEXITY_ENTRY and HOLD_THROUGH_NFP share the same trigger time.
-    # CONVEXITY_ENTRY is the window *right at* that threshold on *that day*;
-    # once it's the next day, we're in HOLD_THROUGH_NFP until NFP.
-    # Since HOLD_THROUGH_NFP check above catches both, we leave this here
-    # only for the allowed_actions mapping.
+    if today == cfg.convexity_entry_day and now >= convexity_threshold:
+        return Phase.CONVEXITY_ENTRY
 
     # 3. UNWIND — carry_unwind_day, before convexity_entry_after_et
     if today == cfg.carry_unwind_day:

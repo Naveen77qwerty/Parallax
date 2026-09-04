@@ -6,14 +6,22 @@ account:
 
 calendar:
   # Judged window as UTC-aware ET sessions. The endgame state machine keys off these.
+  # TEMPORARY (2026-09-04 real-time compression): the team only finished wiring
+  # live credentials on the actual submission day, so last_carry_entry_day and
+  # convexity_entry_day are pulled forward to today and nfp_release_et pushed to
+  # match flatten_by_et (disabling the now-moot MONETIZE window) so CARRY_ACTIVE
+  # covers the real 9:30-10:45 ET market-open window before the real, UNCHANGED
+  # submission_deadline_et / flatten_by_et. Revert last_carry_entry_day to
+  # 2026-09-02, convexity_entry_day to 2026-09-03, and nfp_release_et to
+  # 08:30:00 once this compressed run is done.
   first_full_session: 2026-08-31
-  last_carry_entry_day: 2026-09-02
+  last_carry_entry_day: 2026-09-04
   carry_unwind_day: 2026-09-03
-  convexity_entry_day: 2026-09-03
+  convexity_entry_day: 2026-09-04
   convexity_entry_after_et: "14:30"
   submission_deadline_et: "2026-09-04T11:00:00"
   flatten_by_et: "2026-09-04T10:45:00"
-  nfp_release_et: "2026-09-04T08:30:00"
+  nfp_release_et: "2026-09-04T10:45:00"
 
 sleeve_a_carry:
   enabled: true

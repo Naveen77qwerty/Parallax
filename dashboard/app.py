@@ -26,7 +26,7 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Dispersion Barbell — Live Dashboard",
+    page_title="Parallax — Live Dashboard",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded",
