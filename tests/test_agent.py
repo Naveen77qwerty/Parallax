@@ -38,6 +38,17 @@ def _base_settings():
             spread_width_usd=5.0,
             structure=["put_credit_spread", "iron_condor"],
         ),
+        sleeve_b_convexity=SimpleNamespace(
+            enabled=True,
+            underlying="SPY",
+            structure="put_debit_spread",
+            long_delta_target=0.30,
+            short_delta_target=0.10,
+            expiry_offset_days_past_deadline=7,
+            base_risk_pct_nav=0.014,
+            escalated_risk_pct_nav=0.028,
+            escalate_if_nav_above_start=True,
+        ),
         risk_gates=SimpleNamespace(max_loss_per_position_pct_nav=0.008),
         account=SimpleNamespace(starting_nav=100000.0),
     )
@@ -287,3 +298,119 @@ class TestStructureAgent:
             result = propose_structure("NVDA", self._mock_chain(), screen_r, dispersion_score=None)
 
         assert isinstance(result, ProposedStructure)
+
+
+class TestStructureAgentSleeveB:
+    """propose_structure_sleeve_b — the convexity hedge path (Sleeve B)."""
+
+    def _mock_spy_chain(self) -> dict:
+        long_leg = SimpleNamespace(
+            implied_volatility=0.18,
+            open_interest=5000,
+            latest_quote=SimpleNamespace(bid_price=3.20, ask_price=3.35),
+            greeks=SimpleNamespace(delta=-0.30, gamma=0.02, theta=-0.05, vega=0.20, rho=-0.03),
+            latest_trade=None,
+        )
+        short_leg = SimpleNamespace(
+            implied_volatility=0.20,
+            open_interest=6000,
+            latest_quote=SimpleNamespace(bid_price=1.10, ask_price=1.20),
+            greeks=SimpleNamespace(delta=-0.10, gamma=0.01, theta=-0.03, vega=0.12, rho=-0.01),
+            latest_trade=None,
+        )
+        # Deliberately include a call too — _format_chain_summary_sleeve_b must
+        # filter it out (Sleeve B is puts only).
+        call_leg = SimpleNamespace(
+            implied_volatility=0.19,
+            open_interest=4000,
+            latest_quote=SimpleNamespace(bid_price=2.00, ask_price=2.10),
+            greeks=SimpleNamespace(delta=0.30, gamma=0.02, theta=-0.05, vega=0.20, rho=0.03),
+            latest_trade=None,
+        )
+        return {
+            "SPY260911P00560000": long_leg,
+            "SPY260911P00545000": short_leg,
+            "SPY260911C00600000": call_leg,
+        }
+
+    def _sleeve_b_response(self, **overrides) -> SimpleNamespace:
+        from barbell.agent.structure_agent import _ProposedLegSchema, _ProposedStructureSchema
+
+        legs = overrides.pop("legs", None)
+        if legs is None:
+            legs = [
+                _ProposedLegSchema(expiry="2026-09-11", strike=560.0, right="put", side="buy", contracts=1),
+                _ProposedLegSchema(expiry="2026-09-11", strike=545.0, right="put", side="sell", contracts=1),
+            ]
+        fields = {
+            "underlying": "SPY",
+            "sleeve": "B",
+            "structure_type": "put_debit_spread",
+            "rationale": "SPY put debit spread ahead of NFP; long delta ~0.30, short delta ~0.10.",
+            "max_loss_estimate": 1400.0,
+            "limit_price": -1.35,  # net debit — must be negative per this codebase's sign convention
+            "legs": legs,
+        }
+        fields.update(overrides)
+        parsed = _ProposedStructureSchema(**fields)
+        return SimpleNamespace(parsed=parsed, text=parsed.model_dump_json())
+
+    def test_well_formed_response_returns_sleeve_b_structure(self):
+        from barbell.agent.structure_agent import propose_structure_sleeve_b
+
+        resp = self._sleeve_b_response()
+        with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
+            result = propose_structure_sleeve_b(
+                self._mock_spy_chain(), nav_current=100000.0, nav_starting=100000.0,
+            )
+
+        assert isinstance(result, ProposedStructure)
+        assert result.sleeve == "B"
+        assert result.structure_type == "put_debit_spread"
+        assert result.underlying == "SPY"
+        assert result.limit_price < 0, "Sleeve B is a net debit — limit_price must be negative"
+        assert len(result.legs) == 2
+
+    def test_wrong_sleeve_in_response_raises(self):
+        """Defense in depth: Gemini returning sleeve='A' for a Sleeve B call must not
+        silently pass through — it would misclassify P&L attribution downstream."""
+        from barbell.agent.structure_agent import propose_structure_sleeve_b
+
+        resp = self._sleeve_b_response(sleeve="A")
+        with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()), \
+             patch("barbell.agent.structure_agent.genai.Client") as mock_client:
+            mock_client.return_value.models.generate_content.return_value = resp
+            with pytest.raises(ValueError, match="expected 'B'"):
+                propose_structure_sleeve_b(
+                    self._mock_spy_chain(), nav_current=100000.0, nav_starting=100000.0,
+                )
+
+    def test_chain_summary_filters_out_calls(self):
+        """Sleeve B is puts-only; a call contract in the chain must not appear
+        in the rendered prompt sent to Gemini."""
+        from barbell.agent.structure_agent import _format_chain_summary_sleeve_b
+
+        settings = _base_settings()
+        summary = _format_chain_summary_sleeve_b(self._mock_spy_chain(), settings.sleeve_b_convexity)
+
+        assert "SPY260911P00560000" in summary
+        assert "SPY260911P00545000" in summary
+        assert "SPY260911C00600000" not in summary
+
+    def test_escalated_sizing_used_when_nav_above_start(self):
+        """When NAV has grown past starting_nav and escalate_if_nav_above_start
+        is set, the prompt must target escalated_risk_pct_nav, not base."""
+        from barbell.agent.structure_agent import _build_prompt_sleeve_b
+
+        with patch("barbell.agent.structure_agent.get_settings", return_value=_base_settings()):
+            prompt_above = _build_prompt_sleeve_b(
+                self._mock_spy_chain(), nav_current=101000.0, nav_starting=100000.0,
+            )
+            prompt_at = _build_prompt_sleeve_b(
+                self._mock_spy_chain(), nav_current=100000.0, nav_starting=100000.0,
+            )
+
+        assert "2.80%" in prompt_above  # escalated_risk_pct_nav
+        assert "1.40%" in prompt_at     # base_risk_pct_nav

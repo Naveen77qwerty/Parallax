@@ -181,6 +181,106 @@ streamlit run dashboard/app.py  # optional live view
 
 ---
 
+## Running a Live Demo
+
+`pytest` proves the logic is correct against mocks — it never touches Alpaca or
+Gemini. This section is the actual "watch it trade" walkthrough: every command
+below hits the real paper account and the real Gemini API.
+
+### 1. Confirm both APIs are actually reachable
+
+```bash
+source .venv/bin/activate
+python scripts/verify_day1.py
+```
+
+Look for: `options_approved_level=3`, a real order reaching `ACCEPTED` status
+(Check 2), and Greeks/IV present in the chain snapshot (Check 3). Check 4
+(quote staleness) will legitimately fail outside 9:30–16:00 ET — that's stale
+off-hours data, not a bug; rerun it during market hours to see it pass.
+
+### 2. Start the visual dashboard
+
+```bash
+streamlit run dashboard/app.py
+```
+
+Open `http://localhost:8501`. This is the main thing to have on screen for
+the demo: current NAV vs. the $100k start, phase, kill-switch state,
+dispersion score, a live countdown to the submission deadline, and — once a
+cycle has actually run — NAV history, P&L by sleeve, the risk-decision feed,
+open positions, and recent orders. It auto-refreshes every 30s and makes no
+broker calls itself (reads `data/barbell.db` directly), so it's safe to leave
+open the whole time.
+
+### 3. Run the pipeline for real
+
+```bash
+barbell status       # confirm current phase, NAV, kill-switch before starting
+barbell run-cycle     # one real screen -> catalyst gate -> structure agent -> risk engine -> execution pass
+```
+
+Watch the terminal output: `Phase: <phase>` → `Screen: N survivors / 25
+candidates` → per-survivor `catalyst_risk=True/False` → `RiskDecision: PASS
+/ RESIZE / VETO` → `submit_basket` filling a real (paper) order. Each stage
+writes to the journal as it happens, so the dashboard from step 2 updates
+within its next 30s refresh.
+
+Two things this pipeline depends on that no amount of retrying fixes:
+
+- **Real market hours.** Outside 9:30–16:00 ET, option open-interest/quote
+  data reads stale or zero, so the deterministic screen legitimately rejects
+  every candidate (`oi_below_floor`) before any LLM call happens — that's
+  real off-hours data, not a bug.
+- **The endgame calendar in `config/settings.yaml`.** `barbell status`'s
+  `Phase` line tells you what's currently allowed — `CARRY_ACTIVE` allows
+  Sleeve A opens/closes, `CONVEXITY_ENTRY` allows a Sleeve B open, everything
+  else is closes-only or read-only. If the phase doesn't match what you
+  expect, check the calendar dates before assuming the code is broken.
+
+For an unattended run instead of one-shot cycles, start the actual scheduler
+(the same thing `barbell run-cycle` calls, but looped every
+`cycle_interval_minutes` for as long as the market's open):
+
+```bash
+python3 -c "
+from barbell.logging_config import setup_logging; setup_logging()
+from barbell.scheduler.loop import run_loop
+from barbell.broker.alpaca_client import AlpacaClient
+from barbell.journal.store import JournalStore
+from barbell.config import get_settings
+s = get_settings()
+run_loop(AlpacaClient.from_settings(), JournalStore(str(s.barbell_db_path)))
+"
+```
+
+### 4. Cross-check against Alpaca's own paper dashboard
+
+Log into [app.alpaca.markets/paper/dashboard/overview](https://app.alpaca.markets/paper/dashboard/overview)
+with the same paper account and confirm the order/position from step 3 shows
+up there too — this is independent proof the trade is real, not just a row
+in our own journal DB.
+
+### 5. Generate the write-up from whatever actually happened
+
+```bash
+barbell journal export
+```
+
+Renders `docs/writeup_generated.md` (AI logic + all 13 risk gates with real
+trigger counts + Alpaca infrastructure) and `data/trade_log.csv` straight
+from the journal — no hand-editing. Re-run any time to refresh it with the
+latest trading activity.
+
+### 6. Emergency stop, if needed
+
+```bash
+barbell flatten       # force-closes everything, bypasses phase gating entirely
+barbell status        # confirm 0 open positions afterward
+```
+
+---
+
 ## Tech Stack
 
 | Layer | Choice |
