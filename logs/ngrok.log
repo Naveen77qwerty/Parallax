@@ -9,3 +9,5 @@ t=2026-09-04T18:01:49+0530 lvl=info msg="started tunnel" obj=tunnels name=comman
 t=2026-09-04T18:01:52+0530 lvl=info msg=start pg=/api/tunnels id=e04113dea2189f43
 t=2026-09-04T18:01:52+0530 lvl=info msg=end pg=/api/tunnels id=e04113dea2189f43 status=200 dur=460.377µs
 t=2026-09-04T18:02:05+0530 lvl=info msg="join connections" obj=join id=e65ac443516b l=[::1]:8501 r=[2a09:bac1:3680:128::2a5:7b]:25364
+t=2026-09-04T18:45:04+0530 lvl=info msg=start pg=/api/tunnels id=4e51e310bf975a09
+t=2026-09-04T18:45:04+0530 lvl=info msg=end pg=/api/tunnels id=4e51e310bf975a09 status=200 dur=10.18215ms

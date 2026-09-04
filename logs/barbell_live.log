@@ -1,7 +1,7 @@
-[09/04/26 18:18:12] INFO     Adding job tentatively -- it will be    base.py:507
+[09/04/26 18:43:18] INFO     Adding job tentatively -- it will be    base.py:507
                              properly scheduled when the scheduler              
                              starts                                             
-[09/04/26 18:18:13] INFO     Scheduler starting — cycle every 30     loop.py:324
+                    INFO     Scheduler starting — cycle every 30     loop.py:324
                              min, market_hours_only=True                        
                     INFO     Added job "run_loop.<locals>._tick" to base.py:1092
                              job store "default"                                

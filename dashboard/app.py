@@ -72,7 +72,7 @@ def _load_data(db_path: Path):
     """Load all relevant journal tables into dicts for display."""
     from sqlmodel import Session, select
     from barbell.journal.store import (
-        BasketLegFillRow, CapitalReservationRow, KillSwitchEventRow,
+        BasketLegFillRow, CapitalReservationRow, DispersionScoreRow, KillSwitchEventRow,
         OrderRow, PositionsSnapshotRow, RiskDecisionRow, ScreenResultRow,
     )
 
@@ -84,6 +84,7 @@ def _load_data(db_path: Path):
         risk_decisions = session.exec(select(RiskDecisionRow).order_by(RiskDecisionRow.ts.desc()).limit(50)).all()  # type: ignore[attr-defined]
         reservations = session.exec(select(CapitalReservationRow).order_by(CapitalReservationRow.ts.desc()).limit(20)).all()  # type: ignore[attr-defined]
         screens = session.exec(select(ScreenResultRow).order_by(ScreenResultRow.ts.desc()).limit(200)).all()  # type: ignore[attr-defined]
+        dispersion_scores = session.exec(select(DispersionScoreRow).order_by(DispersionScoreRow.ts.desc()).limit(200)).all()  # type: ignore[attr-defined]
 
     return {
         "orders": orders,
@@ -92,6 +93,7 @@ def _load_data(db_path: Path):
         "risk_decisions": risk_decisions,
         "reservations": reservations,
         "screens": screens,
+        "dispersion_scores": dispersion_scores,
     }
 
 
@@ -110,17 +112,16 @@ def _kill_latched(data: dict) -> bool:
 
 
 def _latest_dispersion_score(data: dict) -> float | None:
-    for row in data["screens"]:
-        if not row.metrics:
-            continue
-        try:
-            m = json.loads(row.metrics) if isinstance(row.metrics, str) else row.metrics
-            score = m.get("dispersion_score")
-            if score is not None:
-                return float(score)
-        except Exception:
-            continue
-    return None
+    scores = data.get("dispersion_scores") or []
+    return float(scores[0].dispersion_score) if scores else None
+
+
+def _dispersion_score_history(data: dict) -> list[tuple[datetime, float]]:
+    return [
+        (row.ts, float(row.dispersion_score))
+        for row in reversed(data["dispersion_scores"])
+        if row.ts is not None
+    ]
 
 
 def _open_reservation(data: dict) -> float:
@@ -272,6 +273,22 @@ def main():
         st.line_chart(df_nav)
     else:
         st.info("No NAV snapshots yet — run a cycle first.")
+
+    # --- Dispersion score trend ---
+    st.subheader("Dispersion Score Trend")
+    st.caption(
+        "Vega-weighted single-name IV / index IV — the barbell thesis's core "
+        "signal. Floor: 1.15 (dashed)."
+    )
+    disp_history = _dispersion_score_history(data)
+    if disp_history:
+        import pandas as pd
+        df_disp = pd.DataFrame(disp_history, columns=["ts", "dispersion_score"])
+        df_disp = df_disp.set_index("ts")
+        df_disp["Floor (1.15)"] = 1.15
+        st.line_chart(df_disp)
+    else:
+        st.info("No dispersion score history yet — run a cycle with at least one survivor first.")
 
     # --- P&L by sleeve ---
     st.subheader("P&L by Sleeve (Filled Orders)")

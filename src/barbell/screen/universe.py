@@ -151,6 +151,14 @@ def screen(
             "Cycle %s: dispersion_score=%.4f (from %d survivors, index_iv=%.4f)",
             cycle_id, d_score, len(dispersion_inputs), index_iv,
         )
+        try:
+            store.record_dispersion_score(
+                cycle_id=cycle_id, dispersion_score=d_score, index_iv=index_iv,
+            )
+        except Exception as exc:
+            # Informational history only — never let a journal write failure
+            # affect the actual screening result.
+            log.warning("Cycle %s: record_dispersion_score failed: %s", cycle_id, exc)
     else:
         log.warning(
             "Cycle %s: dispersion_score not computed (survivors=%d, index_iv=%.4f)",

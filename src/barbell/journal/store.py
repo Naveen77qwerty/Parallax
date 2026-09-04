@@ -58,6 +58,24 @@ class ScreenResultRow(SQLModel, table=True):
     ts: datetime = Field(default_factory=_utcnow)
 
 
+class DispersionScoreRow(SQLModel, table=True):
+    """
+    Portfolio-level dispersion_score per cycle (vega-weighted single-name IV /
+    index IV) — the barbell thesis's core signal. Previously only INFO-logged
+    by screen/universe.py::screen(), never persisted, so there was no way to
+    show it trending across the week. One row per cycle where it's computable
+    (None when there are no survivors yet — screen() already handles that
+    case by passing dispersion_score=None into MarketState).
+    """
+    __tablename__ = "dispersion_scores"  # type: ignore[assignment]
+
+    id: int | None = Field(default=None, primary_key=True)
+    cycle_id: str = Field(index=True)
+    dispersion_score: float
+    index_iv: float
+    ts: datetime = Field(default_factory=_utcnow)
+
+
 class CatalystVerdictRow(SQLModel, table=True):
     __tablename__ = "catalyst_verdicts"  # type: ignore[assignment]
 
@@ -215,6 +233,20 @@ class JournalStore:
             passed=passed,
             reason=reason,
             metrics_json=json.dumps(metrics or {}),
+        )
+        return self._insert(row)
+
+    def record_dispersion_score(
+        self,
+        *,
+        cycle_id: str,
+        dispersion_score: float,
+        index_iv: float,
+    ) -> DispersionScoreRow:
+        row = DispersionScoreRow(
+            cycle_id=cycle_id,
+            dispersion_score=dispersion_score,
+            index_iv=index_iv,
         )
         return self._insert(row)
 

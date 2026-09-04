@@ -165,6 +165,20 @@ def test_journal_store_append_only_invariants():
         assert not m.startswith("drop"), f"Forbidden DROP method found: {m}"
 
 
+def test_record_dispersion_score(journal_store: JournalStore):
+    """dispersion_score was previously only INFO-logged, never persisted —
+    this is the queryable history the dashboard trend chart reads."""
+    row = journal_store.record_dispersion_score(
+        cycle_id="cycle-20260901-001",
+        dispersion_score=1.32,
+        index_iv=0.1719,
+    )
+    assert row.id is not None
+    assert row.dispersion_score == 1.32
+    assert row.index_iv == 0.1719
+    assert row.ts is not None
+
+
 def test_invalid_capital_reservation_status(journal_store: JournalStore):
     """Test that invalid capital reservation status raises ValueError."""
     with pytest.raises(ValueError, match="Invalid capital_reservation status"):
