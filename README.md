@@ -281,7 +281,7 @@ barbell status        # confirm 0 open positions afterward
 
 ---
 
-## Tech Stack
+## Tech Stackbr
 
 | Layer | Choice |
 |---|---|

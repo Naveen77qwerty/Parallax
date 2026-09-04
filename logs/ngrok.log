@@ -1,0 +1,11 @@
+t=2026-09-04T18:01:48+0530 lvl=info msg="no configuration paths supplied"
+t=2026-09-04T18:01:48+0530 lvl=info msg="using configuration at default config path" path=/home/renegader/.config/ngrok/ngrok.yml
+t=2026-09-04T18:01:48+0530 lvl=info msg="open config file" path=/home/renegader/.config/ngrok/ngrok.yml err=<nil>
+t=2026-09-04T18:01:48+0530 lvl=info msg="FIPS 140 mode" enabled=false
+t=2026-09-04T18:01:48+0530 lvl=info msg="starting web service" obj=web addr=127.0.0.1:4040 allow_hosts=[]
+t=2026-09-04T18:01:49+0530 lvl=info msg="client session established" obj=tunnels.session
+t=2026-09-04T18:01:49+0530 lvl=info msg="tunnel session started" obj=tunnels.session
+t=2026-09-04T18:01:49+0530 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:8501 url=https://baffling-steering-cosigner.ngrok-free.dev
+t=2026-09-04T18:01:52+0530 lvl=info msg=start pg=/api/tunnels id=e04113dea2189f43
+t=2026-09-04T18:01:52+0530 lvl=info msg=end pg=/api/tunnels id=e04113dea2189f43 status=200 dur=460.377µs
+t=2026-09-04T18:02:05+0530 lvl=info msg="join connections" obj=join id=e65ac443516b l=[::1]:8501 r=[2a09:bac1:3680:128::2a5:7b]:25364
