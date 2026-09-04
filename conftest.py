@@ -28,3 +28,29 @@ def _no_real_dotenv(monkeypatch):
     real .env must never leak in.
     """
     monkeypatch.setattr("barbell.config.load_dotenv", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _close_journal_stores(monkeypatch):
+    """Dispose every JournalStore a test creates, so its sqlite engine's
+    pooled connection is closed instead of left for the GC to warn about
+    (ResourceWarning: unclosed database).
+
+    Tests instantiate JournalStore directly at ~7 call sites rather than
+    through a shared fixture, so this wraps the constructor to track every
+    instance and closes them all after the test instead of touching each
+    call site individually.
+    """
+    from barbell.journal.store import JournalStore
+
+    instances: list[JournalStore] = []
+    original_init = JournalStore.__init__
+
+    def _tracking_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        instances.append(self)
+
+    monkeypatch.setattr(JournalStore, "__init__", _tracking_init)
+    yield
+    for store in instances:
+        store.close()

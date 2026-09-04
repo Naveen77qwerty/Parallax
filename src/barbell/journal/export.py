@@ -27,6 +27,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy.pool import NullPool
 from sqlmodel import Session, create_engine, select
 
 from barbell.journal.store import (
@@ -47,7 +48,11 @@ _WRITEUP_PATH = Path(__file__).resolve().parent.parent.parent.parent / "docs" / 
 
 
 def _engine(db_path: str | Path):
-    return create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    return create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+        poolclass=NullPool,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +76,7 @@ def export_trade_log_csv(db_path: str | Path) -> str:
 
     with Session(engine) as session:
         rows = session.exec(select(OrderRow).order_by(OrderRow.ts)).all()
+    engine.dispose()
 
     for row in rows:
         legs = json.loads(row.legs_json) if row.legs_json else []
@@ -196,6 +202,7 @@ def export_writeup(db_path: str | Path) -> str:
         kill_events = session.exec(select(KillSwitchEventRow)).all()
         reservations = session.exec(select(CapitalReservationRow)).all()
         leg_fills = session.exec(select(BasketLegFillRow)).all()
+    engine.dispose()
 
     # Summary stats
     filled_orders = [o for o in orders if o.status == "filled"]

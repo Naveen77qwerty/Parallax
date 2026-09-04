@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.pool import NullPool
 from sqlmodel import Field, Session, SQLModel, create_engine
 
 from barbell.config import get_settings
@@ -182,6 +183,7 @@ class JournalStore:
         self._engine = create_engine(
             f"sqlite:///{self._db_path}",
             connect_args={"check_same_thread": False},
+            poolclass=NullPool,
         )
         self._create_tables()
         log.debug("JournalStore initialised at %s", self._db_path)
@@ -189,6 +191,10 @@ class JournalStore:
     def _create_tables(self) -> None:
         """Create all tables if they don't exist yet."""
         SQLModel.metadata.create_all(self._engine)
+
+    def close(self) -> None:
+        """Dispose the underlying engine, closing its pooled DB connection."""
+        self._engine.dispose()
 
     # ------------------------------------------------------------------
     # record_* methods — one per table, INSERT only, never UPDATE/DELETE
