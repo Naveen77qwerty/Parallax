@@ -92,7 +92,10 @@ field being set on an mleg order at all, and Alpaca's debit/credit sign conventi
 `limit_price` is the *opposite* of this codebase's internal convention — both would have
 made every real credit-spread order fail or price backwards, caught only because
 `scripts/verify_day1.py`'s order-submission check was run for real against the live
-account, not left as a mocked assumption. Options orders are limit-only, enforced in code
+account, not left as a mocked assumption. A second live-only finding: `alpaca-py`'s
+option snapshot object carries no reliable open-interest field early in a session — the
+liquidity screen now sources open interest from `get_option_contracts()` (the documented
+contract-metadata endpoint) instead. Options orders are limit-only, enforced in code
 (not just config); the CLI (`barbell run-cycle | status | flatten | verify | journal
 export`) is the scheduled/unattended path, run every `cycle_interval_minutes` during
 market hours via APScheduler.
@@ -105,7 +108,13 @@ guaranteed flat and fully realized before judging regardless of model behavior.
 
 ## Results
 
-*[Fill in from `barbell journal export` / the dashboard once the live window closes:
-starting NAV $100,000, ending NAV, number of cycles run, survivors screened, gate
-PASS/RESIZE/VETO breakdown, and the dispersion-score trend across the week. Alpaca paper
-account ID: `PA3IC9W6B7VZ`.]*
+As of this writing, the live window is still active. Starting NAV $100,000; current NAV
+$100,000 (no fills yet). Three real cycles have run against the live paper account and
+Gemini API (not mocks): 39 individual candidate screens across the seed universe, one
+survivor (JPM, passing liquidity/IV-rank/IV30-HV20/earnings-blackout). That survivor's
+catalyst-gate call hit a transient Gemini `503 UNAVAILABLE` and correctly failed closed
+(`catalyst_risk=True`, trade skipped) — real evidence of the fail-closed design holding
+under an actual API outage, not just a mocked test case. Kill switch clear, reconciliation
+clean every cycle, zero divergence. Alpaca paper account ID: `PA3IC9W6B7VZ`. Final NAV,
+fill count, and dispersion-score trend to be updated via `barbell journal export` once
+the window closes.
