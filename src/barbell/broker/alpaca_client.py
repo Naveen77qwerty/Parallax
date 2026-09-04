@@ -302,17 +302,19 @@ class AlpacaClient:
         ]
 
         # For multi-leg options, Alpaca uses LimitOrderRequest with mleg class.
-        # The `symbol` field is left empty for mleg orders; legs define the structure.
+        # `symbol` must be omitted for mleg orders — Alpaca's API rejects the
+        # request (40010001 "symbol is not allowed for mleg order") if it's set;
+        # legs define the structure instead.
         # qty=1 means "1 spread unit"; contracts per leg are in ratio_qty.
-        # limit_price is the net credit/debit per spread (always a positive float;
-        # direction is determined by which side is the net seller).
+        # Alpaca's mleg limit_price sign is the OPPOSITE of this codebase's
+        # convention (schemas.py: positive=credit, negative=debit) — Alpaca
+        # wants positive=debit, negative=credit — so the sign must be flipped,
+        # not discarded via abs().
         order_req = LimitOrderRequest(
-            symbol=legs[0].symbol if legs[0].symbol else "",  # mleg requires a root symbol
             qty=legs[0].contracts,
-            side=OrderSide.BUY,        # mleg convention: outer side is always BUY
             order_class=OrderClass.MLEG,
             time_in_force=tif_enum,
-            limit_price=abs(limit_price),
+            limit_price=-limit_price,
             legs=option_legs,
         )
 

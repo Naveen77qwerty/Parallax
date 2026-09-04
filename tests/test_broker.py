@@ -122,7 +122,11 @@ def test_submit_mleg_order_covered_spread_success(broker_client):
     assert broker_client._trading.submit_order.called
     req = broker_client._trading.submit_order.call_args[0][0]
     assert req.order_class.value == "mleg"
-    assert req.limit_price == 1.25
+    # This codebase's convention (schemas.py) is positive=credit, negative=debit —
+    # the OPPOSITE of Alpaca's mleg convention (positive=debit, negative=credit),
+    # so a credit spread's limit_price must be sent to Alpaca negated.
+    assert req.limit_price == -1.25
+    assert req.symbol is None  # Alpaca rejects mleg orders with `symbol` set
     assert len(req.legs) == 2
     assert req.legs[0].symbol == "SPY260904P00550000"
     assert req.legs[0].side.value == "sell"
