@@ -132,3 +132,7 @@ t=2026-09-04T19:00:37+0530 lvl=info msg="join connections" obj=join id=b4dd6ac56
 t=2026-09-04T19:00:37+0530 lvl=info msg="join connections" obj=join id=6b17badac3ae l=[::1]:8501 r=[2a09:bac5:3b1b:7eb::ca:17e]:27900
 t=2026-09-04T19:00:37+0530 lvl=info msg="join connections" obj=join id=fce1a2e55dc3 l=[::1]:8501 r=[2a09:bac5:3b1b:7eb::ca:17e]:27900
 t=2026-09-04T19:00:37+0530 lvl=info msg="join connections" obj=join id=3a49e40dcd84 l=[::1]:8501 r=[2a09:bac5:3b1b:7eb::ca:17e]:27900
+t=2026-09-04T19:09:24+0530 lvl=eror msg="heartbeat timeout, terminating session" obj=tunnels.session obj=csess id=9d2cc867c8fa clientid=b4d0286984c4a9d1d9abd578c2edd728
+t=2026-09-04T19:09:24+0530 lvl=eror msg="session closed, starting reconnect loop" obj=tunnels.session obj=csess id=2b86cecac274 err="session closed"
+t=2026-09-04T19:09:25+0530 lvl=info msg="client session established" obj=tunnels.session
+t=2026-09-04T19:09:25+0530 lvl=info msg="tunnel session started" obj=tunnels.session

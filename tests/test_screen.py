@@ -55,6 +55,15 @@ def _build_chain(fixture: dict, symbol: str) -> dict:
     return {occ: _make_snapshot(v) for occ, v in fixture[symbol].items()}
 
 
+def _build_contracts(fixture: dict, symbol: str) -> list[dict]:
+    """Mock get_option_contracts()'s return shape — real open interest lives
+    here (contract metadata), NOT on the OptionsSnapshot mock above."""
+    return [
+        {"symbol": occ, "open_interest": v["open_interest"]}
+        for occ, v in fixture[symbol].items()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # screen/metrics.py — iv_rank
 # ---------------------------------------------------------------------------
@@ -324,6 +333,9 @@ class TestScreenUniverse:
         )
         mock_client = MagicMock()
         mock_client.get_option_chain.return_value = {"WIDE260905P00080000": snap}
+        mock_client.get_option_contracts.return_value = [
+            {"symbol": "WIDE260905P00080000", "open_interest": 2000}
+        ]
 
         result, _ = _screen_one(
             symbol="WIDE",
@@ -347,6 +359,9 @@ class TestScreenUniverse:
         )
         mock_client = MagicMock()
         mock_client.get_option_chain.return_value = {"LOWIV260905P00050000": snap}
+        mock_client.get_option_contracts.return_value = [
+            {"symbol": "LOWIV260905P00050000", "open_interest": 1500}
+        ]
 
         result, _ = _screen_one(
             symbol="LOWIV",
@@ -363,6 +378,7 @@ class TestScreenUniverse:
         fixture = _load_fixture()
         mock_client = MagicMock()
         mock_client.get_option_chain.return_value = _build_chain(fixture, "NVDA")
+        mock_client.get_option_contracts.return_value = _build_contracts(fixture, "NVDA")
 
         result, micro = _screen_one(
             symbol="NVDA",

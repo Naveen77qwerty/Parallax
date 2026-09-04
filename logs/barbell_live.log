@@ -6,3 +6,125 @@
                     INFO     Added job "run_loop.<locals>._tick" to base.py:1092
                              job store "default"                                
                     INFO     Scheduler started                       base.py:214
+[09/04/26 19:13:18] INFO     Running job "run_loop.<locals>._tick    base.py:129
+                             (trigger: interval[0:30:00], next run              
+                             at: 2026-09-04 09:43:18 EDT)"                      
+                             (scheduled at 2026-09-04                           
+                             09:43:18.148833-04:00)                             
+[09/04/26 19:13:26] INFO     [3e6889eb] Phase: CARRY_ACTIVE           loop.py:80
+[09/04/26 19:13:37] WARNING  _get_index_iv(SPY) failed:          universe.py:565
+                             HTTPSConnectionPool(host='data.alpa                
+                             ca.markets', port=443): Max retries                
+                             exceeded with url:                                 
+                             /v1beta1/options/snapshots/SPY?expi                
+                             ration_date_lte=2026-09-18&limit=10                
+                             00 (Caused by                                      
+                             SSLError(SSLEOFError(8, '[SSL:                     
+                             UNEXPECTED_EOF_WHILE_READING] EOF                  
+                             occurred in violation of protocol                  
+                             (_ssl.c:1082)')))                                  
+                    INFO     Index IV (SPY): 0.0000               universe.py:98
+[09/04/26 19:13:45] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for NVDA; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:13:46] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for AMD; treating as                  
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:13:48] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for AVGO; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:13:50] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for CRM; treating as                  
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:13:55] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for ORCL; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:08] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for TSLA; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:12] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for AMZN; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:14] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for SBUX; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:15] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for NKE; treating as                  
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:20] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for GS; treating as                   
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:21] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for COIN; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:23] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for UNH; treating as                  
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:26] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for LLY; treating as                  
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:28] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for XOM; treating as                  
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:39] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for META; treating as                 
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:45] WARNING  _resolve_iv_and_vega: could not     universe.py:462
+                             determine IV for DIS; treating as                  
+                             0.30 for screening (will likely                    
+                             fail iv_rank check)                                
+[09/04/26 19:14:46] WARNING  Cycle 3e6889eb: dispersion_score    universe.py:163
+                             not computed (survivors=1,                         
+                             index_iv=0.0000)                                   
+                    INFO     Cycle 3e6889eb: screen complete —   universe.py:176
+                             1/19 passed. dispersion_score=None                 
+                    INFO     [3e6889eb] Screen: 1 survivors / 19     loop.py:117
+                             candidates                                         
+                    WARNING  Direct use of automatic function     models.py:6247
+                             calling (AFC) in                                   
+                             Models.generate_content is not                     
+                             recommended. Instead, we recommend                 
+                             to use AFC in Chat.send_message.                   
+                             Similarly, direct use of AFC in                    
+                             Models.generate_content_stream is                  
+                             not recommended. Instead, we                       
+                             recommend to use AFC in                            
+                             Chat.send_message_stream.                          
+[09/04/26 19:15:57] ERROR    check_catalyst(JPM): Gemini    catalyst_gate.py:101
+                             API error: 503 UNAVAILABLE.                        
+                             {'error': {'code': 503,                            
+                             'message': 'This model is                          
+                             currently experiencing high                        
+                             demand. Spikes in demand are                       
+                             usually temporary. Please try                      
+                             again later.', 'status':                           
+                             'UNAVAILABLE'}}                                    
+                    INFO     [3e6889eb] JPM: catalyst_risk=True —    loop.py:143
+                             skipping                                           
+[09/04/26 19:15:59] INFO     Reconciliation clean               reconcile.py:164
+                             (cycle=3e6889eb): Reconciliation                   
+                             clean: 0 option position(s) match.                 
+                             NAV=$100000.00                                     
+                    INFO     [3e6889eb] Cycle complete —             loop.py:251
+                             phase=CARRY_ACTIVE survivors=1                     
+                             proposals=0 pass=0 resize=0 veto=0                 
+                             orders=0 diverged=False                            
+                    INFO     Job "run_loop.<locals>._tick (trigger:  base.py:156
+                             interval[0:30:00], next run at:                    
+                             2026-09-04 10:13:18 EDT)" executed                 
+                             successfully                                       

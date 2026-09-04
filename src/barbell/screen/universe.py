@@ -236,8 +236,21 @@ def _screen_one(
             metrics={"sector": sector},
         ), None
 
+    # --- Pull real open interest from contract metadata (NOT the snapshot —
+    #     alpaca-py's OptionsSnapshot has no open_interest field on any plan) ---
+    oi_by_symbol: dict[str, int] = {}
+    try:
+        contracts = client.get_option_contracts(
+            symbol,
+            expiration_date_gte=today + timedelta(days=dte_min),
+            expiration_date_lte=today + timedelta(days=dte_max),
+        )
+        oi_by_symbol = {c["symbol"]: c["open_interest"] for c in contracts}
+    except Exception as exc:
+        log.warning("screen: get_option_contracts(%s) failed: %s — OI defaults to 0", symbol, exc)
+
     # --- Extract aggregate stats from chain ---
-    total_oi, min_spread_pct, best_iv, best_snapshot = _aggregate_chain(chain, symbol)
+    total_oi, min_spread_pct, best_iv, best_snapshot = _aggregate_chain(chain, symbol, oi_by_symbol)
 
     # Build microstructure dicts
     microstructure: dict = {
@@ -332,9 +345,18 @@ def _screen_one(
 def _aggregate_chain(
     chain: dict[str, Any],
     symbol: str,
+    oi_by_symbol: dict[str, int] | None = None,
 ) -> tuple[int, float, float, Any]:
     """
     Summarise an option chain into aggregate stats.
+
+    Args:
+        oi_by_symbol: OCC symbol -> open interest, from
+            AlpacaClient.get_option_contracts() (the contract-metadata
+            endpoint). alpaca-py's OptionsSnapshot (what `chain` is built
+            from) has NO open_interest field at all — it never has, on any
+            data plan — so open interest must come from this separate
+            lookup, not from the snapshot. Missing/None defaults to 0.
 
     Returns:
         (total_oi, best_spread_pct, best_iv, best_snapshot)
@@ -342,27 +364,14 @@ def _aggregate_chain(
     "best" = the ATM contract with the narrowest spread as a proxy for
     the most liquid contract in the chain.
     """
+    oi_by_symbol = oi_by_symbol or {}
     total_oi = 0
     best_spread_pct = float("inf")
     best_iv = 0.0
     best_snapshot = None
 
     for occ_sym, snap in chain.items():
-        # Open interest
-        if hasattr(snap, "latest_trade") and snap.latest_trade:
-            pass  # OI comes from the contract metadata, not snapshot
-
-        # Sum OI from greeks/snapshot — alpaca OptionsSnapshot doesn't always
-        # carry OI; we use a heuristic: count contracts with non-zero volume
-        oi = 0
-        if hasattr(snap, "greeks") and snap.greeks:
-            # OptionsSnapshot carries implied_volatility directly
-            pass
-
-        # Use open_interest attribute if present
-        if hasattr(snap, "open_interest") and snap.open_interest:
-            oi = int(snap.open_interest)
-        total_oi += oi
+        total_oi += int(oi_by_symbol.get(occ_sym) or 0)
 
         # Spread % of mid from latest_quote
         bid = ask = mid = 0.0
