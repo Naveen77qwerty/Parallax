@@ -7,8 +7,8 @@ changes nothing about how the agent trades.
     streamlit run dashboard/app.py
 
 Shows: NAV vs. starting $100k, Sleeve A vs. Sleeve B P&L, open positions
-table, live gate-decision feed (last N risk_decisions rows), kill-switch
-status, and countdown to the Sep 4 11:00 ET submission deadline.
+table, live gate-decision feed (last N risk_decisions rows), and kill-switch
+status.
 """
 from __future__ import annotations
 
@@ -172,23 +172,7 @@ def _current_phase_str() -> str:
         return f"UNKNOWN ({e})"
 
 
-def _deadline_countdown() -> str:
-    try:
-        from barbell.config import get_settings
-        cfg = get_settings().calendar
-        deadline = cfg.submission_deadline_et
-        if deadline.tzinfo is None:
-            deadline = deadline.replace(tzinfo=ET)
-        else:
-            deadline = deadline.astimezone(ET)
-        remaining = deadline - datetime.now(tz=ET)
-        if remaining.total_seconds() < 0:
-            return "⏱ DEADLINE PASSED"
-        h, rem = divmod(int(remaining.total_seconds()), 3600)
-        m, s = divmod(rem, 60)
-        return f"⏱ {h:02d}:{m:02d}:{s:02d} until submission deadline"
-    except Exception as e:
-        return f"(deadline unknown: {e})"
+
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +206,7 @@ def main():
         st.stop()
 
     # --- Header row ---
-    col_title, col_deadline = st.columns([3, 2])
-    with col_title:
-        st.title("Dispersion Barbell — Live Dashboard")
-    with col_deadline:
-        st.info(_deadline_countdown())
+    st.title("Dispersion Barbell — Live Dashboard")
 
     # --- Key metrics row ---
     nav = _latest_nav(data)
