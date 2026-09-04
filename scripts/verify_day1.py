@@ -117,12 +117,15 @@ def run_checks() -> bool:
             short_sym = sorted_puts[len(sorted_puts) // 2]      # ATM-ish
             long_sym = sorted_puts[len(sorted_puts) // 2 - 1]   # 5pts lower
 
-            # Parse strike/expiry from OCC symbol (e.g. SPY251007P00575000)
-            # OCC format: RRRRRRYYMMDDCNNNNNNN — 6 root, 6 date, 1 type, 8 strike
+            # Parse strike/expiry from OCC symbol (e.g. SPY251007P00575000).
+            # Root ticker length varies (SPY=3, AAPL=4, ...) and isn't padded
+            # by Alpaca, so parse from the end — same approach already used
+            # in screen/universe.py's OCC fallback parser.
             def _parse_occ(sym: str) -> tuple[date, float, str]:
-                yy, mm, dd = int(sym[6:8]), int(sym[8:10]), int(sym[10:12])
-                right = "call" if sym[12] == "C" else "put"
-                strike = int(sym[13:21]) / 1000
+                right = "call" if sym[-9].upper() == "C" else "put"
+                strike = int(sym[-8:]) / 1000
+                date_str = sym[-15:-9]
+                yy, mm, dd = int(date_str[:2]), int(date_str[2:4]), int(date_str[4:6])
                 return date(2000 + yy, mm, dd), strike, right
 
             short_exp, short_strike, _ = _parse_occ(short_sym)
