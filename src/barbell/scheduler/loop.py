@@ -50,7 +50,7 @@ def run_one_cycle(
     """
     from barbell.agent.catalyst_gate import check_catalyst
     from barbell.agent.schemas import MarketState, PortfolioState
-    from barbell.agent.structure_agent import propose_structure
+    from barbell.agent.structure_agent import propose_structure, propose_structure_sleeve_b
     from barbell.broker.clock import is_market_open
     from barbell.config import get_settings
     from barbell.endgame.schedule import Phase, allowed_actions, current_phase
@@ -158,6 +158,24 @@ def run_one_cycle(
             proposals.append(structure)
         except Exception as exc:
             log.warning("[%s] propose_structure(%s) failed: %s — skipping", cycle_id, symbol, exc)
+
+    # --- 4b. Sleeve B: convexity hedge proposal (no per-name screen — single
+    #     fixed index underlying from sleeve_b_convexity.underlying). No
+    #     catalyst gate here: Sleeve B exists specifically to hold through a
+    #     scheduled macro catalyst (e.g. NFP), not avoid one. ------------------
+    if "sleeve_b_open" in actions and s.sleeve_b_convexity.enabled:
+        try:
+            b_underlying = s.universe.index_hedge_underlying
+            b_chain = client.get_option_chain(b_underlying)
+            b_structure = propose_structure_sleeve_b(
+                b_chain,
+                nav_current=portfolio_state.current_nav,
+                nav_starting=portfolio_state.starting_nav,
+            )
+            proposals.append(b_structure)
+            log.info("[%s] Sleeve B: proposed %s on %s", cycle_id, b_structure.structure_type, b_underlying)
+        except Exception as exc:
+            log.warning("[%s] propose_structure_sleeve_b failed: %s — skipping", cycle_id, exc)
 
     summary["proposals"] = len(proposals)
 

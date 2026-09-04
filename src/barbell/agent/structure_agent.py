@@ -121,6 +121,147 @@ def propose_structure(
     return structure
 
 
+_PROMPT_PATH_B = Path(__file__).parent / "prompts" / "structure_agent_sleeve_b.md"
+
+
+def propose_structure_sleeve_b(
+    chain: dict[str, Any],
+    nav_current: float,
+    nav_starting: float,
+) -> ProposedStructure:
+    """
+    Ask Gemini to propose Sleeve B's convexity hedge (a put debit spread on
+    sleeve_b_convexity.underlying, e.g. SPY).
+
+    Sizing edge case this addresses: Sleeve B is not screened the way Sleeve A
+    names are (no per-name IV rank / liquidity screen — it's a single, fixed
+    index hedge), so it needs its own prompt path using sleeve_b_convexity
+    config instead of sleeve_a_carry. Fails closed the same way Sleeve A does:
+    any exception here propagates to the caller (scheduler/loop.py), which
+    already wraps this in a try/except and skips the proposal on failure —
+    same pattern as propose_structure(). The risk engine (13 gates, can only
+    tighten) still re-validates this proposal exactly like any other, so a
+    bad or oversized proposal here is resized/rejected, never expanded.
+
+    Removed with a single-point change: set sleeve_b_convexity.enabled: false
+    in config/settings.yaml and the scheduler/loop.py caller skips this path.
+
+    Args:
+        chain:        Dict from broker.alpaca_client.get_option_chain(underlying).
+        nav_current:  Current account NAV (drives escalated vs. base risk %).
+        nav_starting: Starting NAV (the escalation trigger baseline).
+
+    Returns:
+        ProposedStructure with sleeve="B", structure_type="put_debit_spread".
+
+    Raises:
+        ValueError:  if schema validation fails or Gemini returns a bad response.
+        genai_errors.APIError: on API-level failures.
+    """
+    prompt_text = _build_prompt_sleeve_b(chain, nav_current, nav_starting)
+    underlying = get_settings().sleeve_b_convexity.underlying
+    structure = _call_gemini(underlying, prompt_text)
+    if structure.sleeve != "B":
+        raise ValueError(
+            f"propose_structure_sleeve_b: Gemini returned sleeve={structure.sleeve!r}, expected 'B'"
+        )
+    return structure
+
+
+def _build_prompt_sleeve_b(
+    chain: dict[str, Any],
+    nav_current: float,
+    nav_starting: float,
+) -> str:
+    """Render the structure_agent_sleeve_b.md prompt template with live data."""
+    template = _PROMPT_PATH_B.read_text()
+
+    s = get_settings()
+    sleeve_cfg = s.sleeve_b_convexity
+
+    risk_pct = (
+        sleeve_cfg.escalated_risk_pct_nav
+        if (sleeve_cfg.escalate_if_nav_above_start and nav_current > nav_starting)
+        else sleeve_cfg.base_risk_pct_nav
+    )
+    target_max_loss_usd = risk_pct * nav_current
+
+    chain_summary = _format_chain_summary_sleeve_b(chain, sleeve_cfg)
+
+    rendered = (
+        template
+        .replace("{{underlying}}", sleeve_cfg.underlying)
+        .replace("{{long_delta_target}}", str(sleeve_cfg.long_delta_target))
+        .replace("{{short_delta_target}}", str(sleeve_cfg.short_delta_target))
+        .replace("{{target_risk_pct_nav}}", f"{risk_pct * 100:.2f}")
+        .replace("{{target_max_loss_usd}}", f"{target_max_loss_usd:,.0f}")
+        .replace("{{expiry_offset_days}}", str(sleeve_cfg.expiry_offset_days_past_deadline))
+        .replace("{{nav_estimate}}", f"{nav_current:,.0f}")
+        .replace("{{chain_summary}}", chain_summary)
+    )
+    return rendered
+
+
+def _format_chain_summary_sleeve_b(chain: dict[str, Any], sleeve_cfg: Any) -> str:
+    """
+    Format the option chain into a readable put-only table for Gemini,
+    sorted by proximity to Sleeve B's long/short delta targets.
+    """
+    if not chain:
+        return "(no chain data available)"
+
+    rows = []
+    for occ_sym, snap in chain.items():
+        if len(occ_sym) < 9 or occ_sym[-9].upper() != "P":
+            continue  # puts only — Sleeve B is a put debit spread
+
+        bid = ask = mid = iv = delta = 0.0
+
+        if hasattr(snap, "latest_quote") and snap.latest_quote:
+            q = snap.latest_quote
+            bid = float(getattr(q, "bid_price", 0) or 0)
+            ask = float(getattr(q, "ask_price", 0) or 0)
+            if bid > 0 and ask > 0:
+                mid = (bid + ask) / 2.0
+
+        if hasattr(snap, "implied_volatility") and snap.implied_volatility:
+            iv = float(snap.implied_volatility)
+
+        if hasattr(snap, "greeks") and snap.greeks:
+            delta = float(getattr(snap.greeks, "delta", 0) or 0)
+
+        if mid > 0:
+            spread_pct = (ask - bid) / mid if mid > 0 else 0
+            rows.append({
+                "symbol": occ_sym,
+                "bid": bid,
+                "ask": ask,
+                "mid": mid,
+                "iv": iv,
+                "delta": delta,
+                "spread_pct": spread_pct,
+            })
+
+    if not rows:
+        return "(no liquid put contracts found in chain)"
+
+    long_target = sleeve_cfg.long_delta_target
+    short_target = sleeve_cfg.short_delta_target
+    rows.sort(key=lambda r: min(abs(abs(r["delta"]) - long_target), abs(abs(r["delta"]) - short_target)))
+
+    lines = [
+        f"{'OCC Symbol':<25} {'Bid':>6} {'Ask':>6} {'Mid':>6} {'IV%':>6} {'Delta':>7} {'Spread%':>8}",
+        "-" * 70,
+    ]
+    for r in rows[:20]:
+        lines.append(
+            f"{r['symbol']:<25} {r['bid']:>6.2f} {r['ask']:>6.2f} {r['mid']:>6.2f} "
+            f"{r['iv']*100:>5.1f}% {r['delta']:>7.3f} {r['spread_pct']*100:>7.1f}%"
+        )
+
+    return "\n".join(lines)
+
+
 def _build_prompt(
     symbol: str,
     chain: dict[str, Any],
