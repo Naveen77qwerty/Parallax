@@ -347,9 +347,3 @@ All gate thresholds, sizing parameters, and calendar dates live in `config/`:
 | `config/universe.yaml` | Seed candidate tickers for Sleeve A screening |
 
 Numbers are never hardcoded in Python that have a home in config.
-
----
-
-## License
-
-MIT
